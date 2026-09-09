@@ -21,6 +21,7 @@ export type BundledRuntimePrefs = {
 };
 
 export type BundledRuntimeManifest = {
+  layoutVersion?: number;
   node?: string;
   python?: string;
   pythonReleaseTag?: string;

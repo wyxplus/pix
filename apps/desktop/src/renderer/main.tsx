@@ -1,3 +1,4 @@
+import "../desktop/api.ts";
 import { IPC_PROTOCOL_VERSION } from "@pix/contracts";
 import type {
   CatalogPackage,
@@ -109,7 +110,9 @@ import {
 import { requestMacNotificationPermission } from "./lib/notification-permission.ts";
 import { loadNotificationPrefs } from "./lib/notification-prefs.ts";
 import { installOverlayScroll, syncOverlayScroll } from "./lib/overlay-scroll.ts";
-import { sidebarRailWidth } from "./lib/sidebar-prefs.ts";
+import { useResponsiveSidebar } from "./lib/use-responsive-sidebar.ts";
+import { SIDEBAR_MOTION_MS } from "./lib/sidebar-prefs.ts";
+import { TITLEBAR_CONTROL_SIZE_PX, titlebarLeadingGutterPx } from "./lib/desktop-chrome.ts";
 import { matchShortcut, SHORTCUT_OVERRIDES_CHANGED_EVENT } from "./lib/shortcuts.ts";
 import { loadContentModeForSession } from "./lib/content-mode-prefs.ts";
 import { projectTrustPromptKey, shouldPromptProjectTrust } from "./lib/project-trust-prompt.ts";
@@ -272,7 +275,6 @@ function App() {
   const runningSessions = useShellStore((s) => s.runningSessions);
   const reviewOpen = useShellStore((s) => s.reviewOpen);
   const envPanelOpen = useShellStore((s) => s.envPanelOpen);
-  const sidebarOpen = useShellStore((s) => s.sidebarOpen);
   const lastFailure = useShellStore((s) => s.lastFailure);
   const appError = useShellStore((s) => s.appError);
   const view = useShellStore((s) => s.view);
@@ -3163,22 +3165,31 @@ function App() {
     }
   }, [snapshot, colorMode]);
 
-  const railWidth = sidebarRailWidth(sidebarCollapsed, sidebarWidthPx);
+  const sidebar = useResponsiveSidebar(sidebarWidthPx, sidebarCollapsed, toggleSidebarCollapsed);
+  const railWidth = sidebar.railWidth;
+  const navigateFromSidebar = (action: () => unknown) => {
+    sidebar.closeDrawer();
+    action();
+  };
   const mcpNavBadge = mcpStatusFromExtensionUi(extensionUiState);
 
   return (
     <div
+      ref={sidebar.shellRef}
       className={cn(
         // Relative shell: sidebar overlays the clear native window region.
         "app-shell relative h-full w-full overflow-hidden text-[var(--text)]",
-        sidebarOpen && "sidebar-open",
       )}
       style={
         {
           ["--sidebar-current-width" as string]: `${railWidth}px`,
+          ["--sidebar-motion-duration" as string]: `${SIDEBAR_MOTION_MS}ms`,
+          ["--collapsed-header-inset" as string]: `${titlebarLeadingGutterPx() + TITLEBAR_CONTROL_SIZE_PX + 12}px`,
         } as React.CSSProperties
       }
       data-testid="pix-app"
+      data-sidebar-compact={sidebar.compact}
+      data-sidebar-mode={sidebar.overlay ? "overlay" : sidebar.collapsed ? "collapsed" : "docked"}
       data-theme={activeSkinMode}
       data-theme-skin={themeSelection.id}
       data-bootstrap-ready={bootstrapReady ? "true" : "false"}
@@ -3205,8 +3216,9 @@ function App() {
         running={running}
         sessionMarkers={sessionMarkers}
         runningSessions={runningSessions}
-        collapsed={sidebarCollapsed}
-        widthPx={sidebarWidthPx}
+        collapsed={sidebar.collapsed}
+        overlay={sidebar.overlay}
+        widthPx={sidebar.width}
         translucent={sidebarTranslucent}
         glass={sidebarGlass}
         snapshot={snapshot}
@@ -3236,25 +3248,29 @@ function App() {
               : 0
         }
         canFork={timeline.some((item) => item.kind === "user")}
-        onOpenPalette={() => setPaletteOpen(true)}
+        onOpenPalette={() => navigateFromSidebar(() => setPaletteOpen(true))}
         onToggleTheme={() => toggleColorMode()}
-        onToggleCollapse={() => toggleSidebarCollapsed()}
+        onToggleCollapse={sidebar.toggle}
         onResizeWidth={(px) => setSidebarWidthPx(px)}
-        onNewThread={() => void newBlankTask()}
-        onSelectProject={(path) => selectProjectPath(path)}
-        onOpenProjects={() => openProjects()}
-        onOpenPackages={() => void openPackages()}
-        onOpenResources={() => void openResources()}
-        onOpenSettings={() => void openSettings()}
-        onBackToApp={() => void openThread()}
-        onSettingsSection={(section) => setSettingsSection(section)}
+        onNewThread={() => navigateFromSidebar(newBlankTask)}
+        onSelectProject={(path) => navigateFromSidebar(() => selectProjectPath(path))}
+        onOpenProjects={() => navigateFromSidebar(openProjects)}
+        onOpenPackages={() => navigateFromSidebar(openPackages)}
+        onOpenResources={() => navigateFromSidebar(openResources)}
+        onOpenSettings={() => navigateFromSidebar(openSettings)}
+        onBackToApp={() => navigateFromSidebar(openThread)}
+        onSettingsSection={(section) => navigateFromSidebar(() => setSettingsSection(section))}
         onOpenWorkspace={() => void openWorkspacePicker()}
         onResumeWorkspace={() => void resumeWorkspace()}
         onToggleTrust={() => void toggleTrust()}
-        onOpenRecent={(path) => void openWorkspacePath(path, { resumeRecent: true })}
-        onSwitchThread={(path, projectCwd) => void switchThread(path, projectCwd)}
+        onOpenRecent={(path) =>
+          navigateFromSidebar(() => openWorkspacePath(path, { resumeRecent: true }))
+        }
+        onSwitchThread={(path, projectCwd) =>
+          navigateFromSidebar(() => switchThread(path, projectCwd))
+        }
         onForkThread={() => void forkThread()}
-        onNewThreadForProject={(path) => void newThreadForProject(path)}
+        onNewThreadForProject={(path) => navigateFromSidebar(() => newThreadForProject(path))}
         onRemoveRecent={(path) => void removeRecentWorkspace(path)}
         onRevealInFolder={(path) => void revealWorkspace(path)}
         onRefresh={() => void refresh()}
@@ -3268,6 +3284,7 @@ function App() {
       */}
       <div
         className="shell-content"
+        inert={sidebar.overlay}
         style={{
           paddingLeft: railWidth,
           // When collapsed, content is full width.
@@ -3294,7 +3311,7 @@ function App() {
                 thread={activeThread}
                 workspacePath={workspacePath}
                 sessionId={snapshot?.sessionId}
-                collapsed={sidebarCollapsed}
+                collapsed={railWidth === 0}
                 contentModeSwitchLocked={running}
                 onToggleContentMode={() => void toggleContentModeSurface()}
                 extensionUi={extensionUiState}
@@ -3374,11 +3391,11 @@ function App() {
                     }}
                     emptyState={
                       <div
-                        className="thread-messages empty flex min-h-full flex-1 flex-col items-center justify-center px-4 text-center"
+                        className="thread-empty-state thread-messages empty flex min-h-full flex-1 flex-col items-center justify-center px-4 text-center"
                         data-testid="empty-hero"
                       >
-                        <PixLogo className="mb-5 size-12" title={t(locale, "app.name")} />
-                        <h1 className="m-0 max-w-lg text-[26px] leading-snug font-semibold tracking-[-0.03em] text-[var(--text)]">
+                        <PixLogo className="thread-empty-logo" title={t(locale, "app.name")} />
+                        <h1 className="thread-empty-title">
                           {workspacePath
                             ? t(locale, "empty.title", { name: workspace.name })
                             : isPureConversation || snapshot || pendingPureConversation
@@ -3386,7 +3403,7 @@ function App() {
                               : t(locale, "empty.titleNoWorkspace")}
                         </h1>
                         {!workspacePath ? (
-                          <p className="mt-3 max-w-md text-[13px] text-[var(--muted-foreground)]">
+                          <p className="thread-empty-subtitle">
                             {isPureConversation || snapshot || pendingPureConversation
                               ? t(locale, "empty.subtitleConversation")
                               : t(locale, "empty.subtitleNoWorkspace")}
@@ -3422,7 +3439,7 @@ function App() {
                               aria-label={t(locale, "thread.scrollToBottom")}
                               className={cn(
                                 "pointer-events-auto z-20 size-7 rounded-full border border-border bg-popover text-foreground",
-                                "shadow-[0_4px_16px_rgb(0_0_0/0.28)] hover:bg-accent",
+                                "shadow-[var(--shadow-soft)] hover:bg-accent",
                                 // Defeat MessageScrollerButton’s default data-[direction=end]:bottom-4.
                                 "data-[direction=end]:bottom-[calc(100%+12px)]",
                               )}

@@ -605,11 +605,7 @@ export function EnvPanel(props: {
         minWidth={flyout === "branch" ? 280 : 220}
         zIndex={12_000}
         testId={flyout ? `env-flyout-${flyout}` : "env-flyout"}
-        className={
-          flyout === "branch"
-            ? "!rounded-[var(--radius-panel)] !border-[var(--border)] !bg-[var(--surface-panel)] !py-0 overflow-hidden shadow-[var(--shadow-soft)]"
-            : "!rounded-[var(--radius-panel)] !bg-[var(--surface-panel)] !py-0"
-        }
+        className={flyout === "branch" ? "!py-0 overflow-hidden" : "!py-0"}
       >
         {flyoutContent}
       </FloatingMenu>
@@ -780,7 +776,7 @@ function CommitDialog(props: {
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[11000] flex items-center justify-center bg-black/50 p-4"
+      className="desktop-dialog-overlay fixed inset-0 z-[11000] flex items-center justify-center p-4"
       data-testid="env-commit-dialog"
       role="dialog"
       aria-modal="true"
@@ -789,14 +785,14 @@ function CommitDialog(props: {
       }}
     >
       <div
-        className="surface-panel w-full max-w-md p-4 shadow-2xl"
+        className="surface-panel w-full max-w-md p-4 shadow-[var(--shadow-soft)]"
         onMouseDown={(e) => e.stopPropagation()}
       >
         <h2 className="m-0 mb-2 text-[15px] font-semibold text-[var(--foreground)]">
           {props.mode === "commitAndPush" ? tr("env.commitAndPush") : tr("env.commit")}
         </h2>
         <textarea
-          className="mb-3 min-h-[96px] w-full resize-y rounded-lg border border-[var(--border)] bg-transparent px-3 py-2 text-[13px] outline-none focus:border-[var(--ring,#0a84ff)] disabled:opacity-60"
+          className="mb-3 min-h-[96px] w-full resize-y rounded-lg border border-[var(--border)] bg-transparent px-3 py-2 text-[13px] outline-none focus:border-[var(--ring,#3a83f7)] disabled:opacity-60"
           placeholder={
             props.generating ? tr("env.commitMessageGenerating") : tr("env.commitMessage")
           }
@@ -816,7 +812,7 @@ function CommitDialog(props: {
           </button>
           <button
             type="button"
-            className="h-8 rounded-lg bg-[#0a84ff] px-3.5 text-[13px] font-medium text-white hover:bg-[#0a84ff]/90 disabled:opacity-40"
+            className="h-8 rounded-lg bg-[var(--link)] px-3.5 text-[13px] font-medium text-white hover:bg-[var(--link)]/90 disabled:opacity-40"
             disabled={locked}
             data-testid="env-commit-confirm"
             onClick={() => void props.onConfirm()}

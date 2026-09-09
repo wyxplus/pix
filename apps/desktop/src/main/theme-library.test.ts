@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-vi.mock("electron", () => ({
+vi.mock("../sidecar/image.ts", () => ({
   nativeImage: {
     createFromPath: () => ({
       isEmpty: () => false,
@@ -141,7 +141,7 @@ describe("ThemeLibrary", () => {
       backgroundPath: sourceImage,
     });
     const skin = saved.skins[0]!;
-    expect(skin.backgroundUrl).toContain("/background");
+    expect(skin.backgroundUrl).toMatch(/^data:image\/png;base64,/);
     const output = library.exportDirectory(skin.id, exportRoot);
     const exportedConfig = JSON.parse(readFileSync(join(output, "theme.json"), "utf8")) as {
       image?: string;

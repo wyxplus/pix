@@ -9,9 +9,26 @@ import {
   mainColumnLeftForRail,
   shellMainWidth,
   sidebarRailWidth,
+  isCompactSidebar,
+  responsiveSidebarWidth,
 } from "./sidebar-prefs.ts";
 
 describe("sidebar prefs helpers", () => {
+  it("gives content priority while retaining the preferred sidebar width", () => {
+    expect(responsiveSidebarWidth(1440, 300, false)).toBe(300);
+    expect(responsiveSidebarWidth(880, 300, false)).toBe(280);
+    expect(responsiveSidebarWidth(832, 300, false)).toBe(232);
+    expect(responsiveSidebarWidth(1440, 300, false)).toBe(300);
+    expect(responsiveSidebarWidth(320, 360, true)).toBe(272);
+  });
+
+  it("uses different collapse and reopen boundaries to avoid resize flicker", () => {
+    expect(isCompactSidebar(832)).toBe(false);
+    expect(isCompactSidebar(831)).toBe(true);
+    expect(isCompactSidebar(850, true)).toBe(true);
+    expect(isCompactSidebar(864, true)).toBe(false);
+  });
+
   it("clamps width and reports full collapse (width 0, not icon rail)", () => {
     expect(clampSidebarWidth(100)).toBe(232);
     expect(clampSidebarWidth(400)).toBe(360);

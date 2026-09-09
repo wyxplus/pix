@@ -459,7 +459,6 @@ export function prunePythonRuntime(pythonRoot) {
       "lib2to3",
       "test",
       "tests",
-      "ensurepip/_bundled", // keep ensurepip module; drop heavy wheels if present as dir
     ]) {
       drop.push(join(pyLib, name));
     }
@@ -595,7 +594,12 @@ async function fetchOne(target, versions, force) {
   ) {
     try {
       const prev = JSON.parse(readFileSync(manifestPath, "utf8"));
-      if (prev.node === versions.node && prev.python === versions.python && prev.pruned === true) {
+      if (
+        prev.node === versions.node &&
+        prev.python === versions.python &&
+        prev.pruned === true &&
+        prev.layoutVersion === 2
+      ) {
         console.log(`[fetch-runtimes] ${target.key} already at pinned versions (pruned)`);
         return { platformDir, nodeDest, pythonDest, manifestPath };
       }
@@ -672,6 +676,7 @@ async function fetchOne(target, versions, force) {
     arch: target.arch,
     key: target.key,
     pruned: true,
+    layoutVersion: 2,
     nodeBytes,
     pythonBytes: pyBytes,
     nodeBinary: nodeBinAfter.replace(platformDir + (process.platform === "win32" ? "\\" : "/"), ""),

@@ -16,11 +16,11 @@
     "build:landing": "vp run --no-cache @pix/landing#build",
     "preview:landing": "vp run --no-cache @pix/landing#preview",
     "demo:session-content": "vp run --no-cache @pix/desktop#demo:session-content",
-    "electron:install": "vp run --no-cache @pix/desktop#electron:install",
     "e2e": "vp run --no-cache @pix/desktop#e2e",
     "package": "vp run --no-cache @pix/desktop#package",
     "version:set": "node scripts/set-version.mjs",
-    "test:release-assets": "node scripts/release-assets.test.mjs && node scripts/merge-latest-mac-yml.test.mjs"
+    "test:release-assets": "node scripts/release-assets.test.mjs",
+    "check:rust": "pnpm --filter @pix/desktop check:rust"
   },
   "devDependencies": {
     "@types/node": "catalog:",
@@ -37,7 +37,7 @@
     }
   },
   "engines": {
-    "node": ">=22.19.0"
+    "node": ">=24.0.0"
   },
   "packageManager": "pnpm@11.15.1"
 }

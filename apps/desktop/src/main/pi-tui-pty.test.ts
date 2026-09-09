@@ -278,75 +278,9 @@ describe("resolvePiPtyLaunch", () => {
     expect(launch.env.ELECTRON_RUN_AS_NODE).toBeUndefined();
   });
 
-  it("runs asar-packaged CLI via Electron-as-Node, not system node", () => {
-    // Last-resort fallback when userData extract is missing. Isolated asar path
-    // so a real /Applications/Pix.app install cannot rewrite it to unpacked.
-    const asarCli = join(
-      tmpdir(),
-      "pix-no-such-app.app",
-      "Contents",
-      "Resources",
-      "app.asar",
-      "node_modules",
-      "@earendil-works",
-      "pi-coding-agent",
-      "dist",
-      "cli.js",
-    );
-    const systemNode = join(tmpdir(), "fake-system-node");
-    writeFileSync(systemNode, "#!/bin/sh\n", { mode: 0o755 });
-
-    const prevElectron = process.versions.electron;
-    const prevExec = process.execPath;
-    // Vitest is plain Node — simulate packaged Electron main.
-    Object.defineProperty(process.versions, "electron", {
-      value: "39.0.0",
-      configurable: true,
-    });
-    // process.execPath is read-only on some runtimes; spy via defineProperty when possible.
-    const electronBin = join(tmpdir(), "Pix");
-    writeFileSync(electronBin, "#!/bin/sh\n", { mode: 0o755 });
-    try {
-      Object.defineProperty(process, "execPath", {
-        value: electronBin,
-        configurable: true,
-      });
-    } catch {
-      // If execPath cannot be redefined, skip the electron path assertion body.
-    }
-
-    try {
-      const launch = resolvePiPtyLaunch(asarCli, ["--session", "/s.jsonl"], {
-        PATH: dirname(systemNode),
-        HOME: tmpdir(),
-        NODE_BINARY: systemNode,
-      });
-      // Must not hand an asar path to system node (Cannot find module).
-      expect(launch.file).not.toBe(systemNode);
-      if (process.execPath === electronBin) {
-        expect(launch.file).toBe(electronBin);
-        expect(launch.env.ELECTRON_RUN_AS_NODE).toBe("1");
-      }
-      expect(launch.args[0]).toBe(asarCli);
-      expect(launch.args.slice(1)).toEqual(["--session", "/s.jsonl"]);
-    } finally {
-      if (prevElectron === undefined) {
-        delete (process.versions as { electron?: string }).electron;
-      } else {
-        Object.defineProperty(process.versions, "electron", {
-          value: prevElectron,
-          configurable: true,
-        });
-      }
-      try {
-        Object.defineProperty(process, "execPath", {
-          value: prevExec,
-          configurable: true,
-        });
-      } catch {
-        // ignore
-      }
-    }
+  it("rejects legacy archive-only CLI paths with an actionable error", () => {
+    const archiveCli = join(tmpdir(), "pix-no-such-app", "app.asar", "dist", "cli.js");
+    expect(() => resolvePiPtyLaunch(archiveCli, [], {})).toThrow("choose the bundled SDK");
   });
 
   it("does not treat app.asar.unpacked paths as asar archives", () => {

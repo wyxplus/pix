@@ -123,27 +123,3 @@ export function withNodeEnvProxyFlag(env: Record<string, string>): Record<string
   if (!hasProxy) return env;
   return { ...env, NODE_USE_ENV_PROXY: "1" };
 }
-
-/** Electron session.setProxy config for the app channel. */
-export function electronProxyConfig(channel: ProxyChannelPrefs): {
-  mode: "direct" | "system" | "fixed_servers";
-  proxyRules?: string;
-  proxyBypassRules?: string;
-} {
-  if (channel.mode === "off") {
-    return { mode: "direct" };
-  }
-  if (channel.mode === "system") {
-    return { mode: "system" };
-  }
-  const server = channel.server?.trim();
-  if (!server) {
-    return { mode: "direct" };
-  }
-  const bypass = channel.bypass?.trim() || "<local>";
-  return {
-    mode: "fixed_servers",
-    proxyRules: server,
-    proxyBypassRules: bypass,
-  };
-}

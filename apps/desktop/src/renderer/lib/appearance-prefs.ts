@@ -17,11 +17,15 @@ export type AppearancePrefs = {
 const KEY = "pix.appearance.prefs.v1";
 export const APPEARANCE_PREFS_CHANGED_EVENT = "pix-appearance-prefs";
 
-/** Matches styles.css @theme --font-sans default. */
-export const DEFAULT_UI_FONT_FAMILY =
-  '"Inter", "SF Pro Text", "Segoe UI", system-ui, -apple-system, sans-serif';
-/** Matches styles.css @theme --font-mono default. */
+/** Match Codex desktop's platform font stacks and styles.css @theme defaults. */
+export const DEFAULT_UI_FONT_FAMILY = '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
 export const DEFAULT_CODE_FONT_FAMILY =
+  'ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace';
+
+// Earlier versions persisted the default stacks alongside other appearance prefs.
+const LEGACY_UI_FONT_FAMILY =
+  '"Inter", "SF Pro Text", "Segoe UI", system-ui, -apple-system, sans-serif';
+const LEGACY_CODE_FONT_FAMILY =
   '"SF Mono", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace';
 
 export const DEFAULT_APPEARANCE_PREFS: AppearancePrefs = {
@@ -43,10 +47,11 @@ function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.round(n)));
 }
 
-function normalizeFontFamily(value: unknown, fallback: string): string {
+function normalizeFontFamily(value: unknown, fallback: string, legacyDefault: string): string {
   if (typeof value !== "string") return fallback;
   const trimmed = value.trim();
   if (!trimmed || trimmed.length > MAX_FONT_FAMILY_LENGTH) return fallback;
+  if (trimmed === legacyDefault) return fallback;
   // Reject control characters that could break CSS custom properties.
   for (const ch of trimmed) {
     const code = ch.charCodeAt(0);
@@ -62,8 +67,16 @@ export function normalizeAppearancePrefs(
   return {
     uiFontSize: clamp(Number(base.uiFontSize), UI_FONT_SIZE_MIN, UI_FONT_SIZE_MAX),
     codeFontSize: clamp(Number(base.codeFontSize), CODE_FONT_SIZE_MIN, CODE_FONT_SIZE_MAX),
-    uiFontFamily: normalizeFontFamily(base.uiFontFamily, DEFAULT_UI_FONT_FAMILY),
-    codeFontFamily: normalizeFontFamily(base.codeFontFamily, DEFAULT_CODE_FONT_FAMILY),
+    uiFontFamily: normalizeFontFamily(
+      base.uiFontFamily,
+      DEFAULT_UI_FONT_FAMILY,
+      LEGACY_UI_FONT_FAMILY,
+    ),
+    codeFontFamily: normalizeFontFamily(
+      base.codeFontFamily,
+      DEFAULT_CODE_FONT_FAMILY,
+      LEGACY_CODE_FONT_FAMILY,
+    ),
   };
 }
 

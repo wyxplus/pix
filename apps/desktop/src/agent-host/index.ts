@@ -21,14 +21,12 @@ import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
 import { ProviderOAuthCoordinator, type OAuthModelRuntime } from "./provider-oauth.ts";
 
-interface ElectronParentPort {
-  postMessage(message: unknown): void;
-  on(event: "message", listener: (event: { data: unknown }) => void): this;
-  start(): void;
-}
-
-const parentPort = (process as NodeJS.Process & { parentPort?: ElectronParentPort }).parentPort;
-if (!parentPort) throw new Error("Pix Agent Host must run as an Electron utility process");
+if (!process.send) throw new Error("Pix Agent Host requires a Node IPC parent");
+process.on("disconnect", () => {
+  unsubscribe?.();
+  void handle?.dispose().finally(() => process.exit(0));
+  setTimeout(() => process.exit(0), 1500).unref();
+});
 
 function logHostFatal(kind: string, error: unknown): void {
   const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
@@ -48,7 +46,7 @@ let sequence = 0;
 const toolArgsByCallId = new Map<string, unknown>();
 
 function post(event: HostEvent): void {
-  parentPort.postMessage(event);
+  if (process.connected) process.send?.(event);
 }
 
 const providerOAuth = new ProviderOAuthCoordinator(post);
@@ -1169,14 +1167,13 @@ async function handleCommand(command: HostCommand): Promise<void> {
   }
 }
 
-parentPort.on("message", (event) => {
-  if (!isHostCommand(event.data)) {
+process.on("message", (message) => {
+  if (!isHostCommand(message)) {
     post(errorEvent(new Error("Rejected invalid Agent Host command")));
     return;
   }
-  void handleCommand(event.data);
+  void handleCommand(message);
 });
-parentPort.start();
 
 post({
   protocolVersion: IPC_PROTOCOL_VERSION,

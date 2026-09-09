@@ -1,7 +1,6 @@
 /**
  * Settings chrome layout + thin wrappers around default shadcn form controls.
- * Controls intentionally use stock shadcn styling (no custom skins), except
- * filter search fields which share one pill chrome (SettingsSearchField).
+ * Controls share the desktop theme, including the compact filter search field.
  */
 import * as React from "react";
 import type { ReactNode } from "react";
@@ -93,7 +92,7 @@ export function SettingsDocsLink(props: { href: string; children: ReactNode; tes
 
 /**
  * Unified filter search field for all Settings surfaces (left rail + every page toolbar).
- * One pill shell, one height/radius/type size — never nest a full shadcn Input.
+ * One shared shell, height, radius, and type size — never nest a full Input.
  */
 export function SettingsSearchField(props: {
   value: string;

@@ -1,6 +1,7 @@
 /**
- * Pix brand mark — matches apps/desktop/build/icon.svg (white plate + black π).
- * Used in sidebar, empty hero, and any in-app chrome. Keep geometry in sync with icon.svg.
+ * Pix brand mark — same white plate + black π as apps/desktop/build/icon.svg.
+ * In-app chrome uses the unpadded mark; the application icon adds transparent outer padding.
+ * Keep the inner mark geometry in sync with icon.svg.
  */
 import { cn } from "../lib/utils.ts";
 

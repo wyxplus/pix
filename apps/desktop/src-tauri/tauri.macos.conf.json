@@ -1,0 +1,21 @@
+{
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Pix",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 760,
+        "minHeight": 560,
+        "decorations": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": { "x": 16, "y": 16 },
+        "transparent": true,
+        "dragDropEnabled": true,
+        "windowEffects": { "effects": ["sidebar"], "state": "active" }
+      }
+    ]
+  }
+}

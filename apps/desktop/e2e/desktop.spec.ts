@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { test, expect, startHost, conversationSessionButtons, sendPrompt } from "./fixtures.ts";
 
-test.describe("Desktop shell Playwright E2E (macOS Electron)", () => {
+test.describe("Desktop shell + Node Sidecar E2E", () => {
   test("conversation content renders safe interactive rich content", async ({ page, pix }) => {
     await startHost(page);
     await page.evaluate(() => {
@@ -48,6 +48,7 @@ test.describe("Desktop shell Playwright E2E (macOS Electron)", () => {
         tableLayout: getComputedStyle(element.querySelector("table")!).tableLayout,
       })),
     ).toEqual({ overflowX: "hidden", tableLayout: "fixed" });
+    await markdownTable.hover();
     const tableCopyButton = markdownTable.getByTestId("markdown-table-copy");
     await tableCopyButton.click();
     await expect(tableCopyButton).toHaveAccessibleName(/Table copied|已复制表格/i);
@@ -184,7 +185,7 @@ test.describe("Desktop shell Playwright E2E (macOS Electron)", () => {
     await expect(page.getByTestId("composer-slash-menu")).toContainText("/e2e-review");
     await expect(page.getByTestId("composer-slash-menu")).toContainText("/skill:e2e-skill");
     await page.getByTestId("composer-slash-item").filter({ hasText: "/e2e-review" }).click();
-    await expect(page.getByTestId("prompt-input")).toHaveValue("/e2e-review ");
+    await expect(page.getByTestId("prompt-highlight")).toContainText("E2e Review");
 
     await page.getByTestId("prompt-input").fill("@");
     await expect(page.getByTestId("composer-attach-menu")).toBeVisible();
@@ -696,7 +697,7 @@ test.describe("Desktop shell Playwright E2E (macOS Electron)", () => {
           document.documentElement.style.getPropertyValue("--skin-wallpaper-image"),
         ),
       )
-      .toContain("pix-theme://");
+      .toContain("data:image/png;base64,");
     await expect
       .poll(() =>
         themeTrack.evaluate((element) => {
@@ -1084,6 +1085,12 @@ test.describe("Desktop shell Playwright E2E (macOS Electron)", () => {
     await expect(page.getByText("Explore and understand the code")).toHaveCount(0);
 
     async function assertComposerAlignedToMain(opts?: { collapsed?: boolean }) {
+      // Compare settled geometry; folding now deliberately keeps both panes moving together.
+      await expect
+        .poll(() =>
+          page.getByTestId("sidebar").evaluate((element) => element.getAnimations().length),
+        )
+        .toBe(0);
       const main = await page.getByTestId("shell-main").boundingBox();
       const dock = await page.getByTestId("composer-dock").boundingBox();
       const app = await page.getByTestId("pix-app").boundingBox();

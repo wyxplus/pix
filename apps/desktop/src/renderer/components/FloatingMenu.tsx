@@ -9,6 +9,7 @@ import {
   useState,
   type CSSProperties,
   type ReactNode,
+  type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "../lib/utils.ts";
@@ -60,11 +61,17 @@ export function FloatingMenu(props: {
   onClose: () => void;
   children: ReactNode;
   testId?: string;
+  role?: "menu" | "dialog";
+  ariaLabel?: string;
+  /** Keep the trigger's own click handler in charge of toggling the popup. */
+  triggerRef?: RefObject<HTMLElement | null>;
   /** Preferred min width in px */
   minWidth?: number;
   className?: string;
   /** Open below (default), above, or to the right of the anchor. */
   placement?: FloatingMenuPlacement;
+  /** Horizontal alignment for top/bottom popups. */
+  align?: "start" | "end";
   /** Stacking order — flyouts should sit above the parent menu. */
   zIndex?: number;
   /** Close on pointer events outside the menu. Default true; Escape always closes. */
@@ -78,6 +85,8 @@ export function FloatingMenu(props: {
    * Default true keeps project-context-menu elevation for other menus.
    */
   elevated?: boolean;
+  /** Let a specialized picker provide its own surface without generic menu/skin chrome. */
+  surface?: "default" | "custom";
   /** Gap in px between menu and anchor (default 6 above / 4 below). */
   offsetPx?: number;
 }) {
@@ -123,6 +132,7 @@ export function FloatingMenu(props: {
       if (!closeOnOutside) return;
       const target = ev.target;
       if (!(target instanceof Element)) return;
+      if (props.triggerRef?.current?.contains(target)) return;
       if (target.closest("[data-floating-menu]")) return;
       props.onClose();
     };
@@ -147,7 +157,7 @@ export function FloatingMenu(props: {
       window.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("resize", onResize);
     };
-  }, [open, closeOnOutside, closeOnScroll, props.onClose]);
+  }, [open, closeOnOutside, closeOnScroll, props.onClose, props.triggerRef]);
 
   if (!open || !props.anchor || typeof document === "undefined") return null;
 
@@ -159,7 +169,7 @@ export function FloatingMenu(props: {
   const vh = window.innerHeight;
   const pad = 8;
 
-  let left = anchor.left;
+  let left = props.align === "end" ? anchor.right - width : anchor.left;
   let top = anchor.bottom + gap;
 
   if (placement === "top") {
@@ -206,16 +216,18 @@ export function FloatingMenu(props: {
   return createPortal(
     <div
       ref={menuRef}
-      role="menu"
+      role={props.role ?? "menu"}
+      aria-label={props.ariaLabel}
       data-testid={props.testId}
       data-floating-menu=""
       data-elevated={elevated ? "true" : "false"}
       data-placement={placement}
       className={cn(
-        "surface-panel overflow-x-hidden overflow-y-auto p-0 py-1 text-popover-foreground outline-none",
-        elevated
-          ? "project-context-menu shadow-2xl"
-          : "composer-suggest-menu overflow-hidden shadow-none",
+        "overflow-x-hidden overflow-y-auto p-0 py-1 text-popover-foreground outline-none",
+        props.surface !== "custom" &&
+          (elevated
+            ? "desktop-menu-surface project-context-menu"
+            : "surface-panel composer-suggest-menu overflow-hidden shadow-none"),
         props.className,
       )}
       style={style}

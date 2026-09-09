@@ -5,20 +5,26 @@
   "description": "Desktop shell for the pi coding agent",
   "homepage": "https://github.com/num-scope/pix",
   "author": "num-scope <noreply@users.noreply.github.com>",
+  "files": [
+    "dist/sidecar",
+    "dist/agent-host"
+  ],
   "type": "module",
-  "main": "dist/main/main.mjs",
   "scripts": {
-    "build": "vp build --config vite.renderer.config.ts && vp build --config vite.preload.config.ts && vp build --config vite.main.config.ts && vp build --config vite.agent.config.ts",
-    "dev": "pnpm run build && node scripts/launch.mjs",
+    "build": "vp build --config vite.renderer.config.ts && vp build --config vite.sidecar.config.ts && vp build --config vite.agent.config.ts",
+    "dev": "node scripts/launch.mjs",
     "e2e": "pnpm run build && playwright test",
     "e2e:ui": "pnpm run build && playwright test --ui",
     "demo:session-content": "vp build --config vite.renderer.config.ts && vp preview --config vite.renderer.config.ts --host 127.0.0.1 --port 4177 --open /session-content-demo.html",
-    "electron:install": "install-electron",
     "runtimes:fetch": "node scripts/fetch-runtimes.mjs",
-    "package": "node scripts/fetch-runtimes.mjs && pnpm run build && electron-builder --config electron-builder.yml --publish never",
-    "test": "vp test --run --config vite.renderer.config.ts && node scripts/fetch-runtimes.test.mjs && node scripts/after-pack.test.mjs",
-    "test:after-pack": "node scripts/after-pack.test.mjs",
-    "test:runtimes": "node scripts/fetch-runtimes.test.mjs"
+    "package": "pnpm run build && node scripts/prepare-sidecar.mjs --release && tauri build",
+    "test": "vp test --run --config vite.renderer.config.ts && node scripts/fetch-runtimes.test.mjs && node --test scripts/dev-session.test.mjs",
+    "test:runtimes": "node scripts/fetch-runtimes.test.mjs",
+    "dev:frontend": "vp dev --config vite.renderer.config.ts",
+    "tauri": "tauri",
+    "sidecar:prepare": "node scripts/prepare-sidecar.mjs",
+    "check:rust": "node scripts/prepare-sidecar.mjs && cargo check --manifest-path src-tauri/Cargo.toml",
+    "test:sidecar": "pnpm run build && node scripts/sidecar-smoke.test.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "catalog:",
@@ -26,10 +32,12 @@
     "@pix/contracts": "workspace:*",
     "@shadcn/react": "catalog:",
     "@silvia-odwyer/photon-node": "catalog:",
+    "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-updater": "^2.10.0",
     "class-variance-authority": "catalog:",
     "clsx": "catalog:",
     "cmdk": "catalog:",
-    "electron-updater": "6.8.9",
     "ghostty-web": "catalog:",
     "highlight.js": "catalog:",
     "katex": "catalog:",
@@ -46,17 +54,17 @@
     "remark-math": "catalog:",
     "tailwind-merge": "catalog:",
     "tw-animate-css": "catalog:",
+    "undici": "^7.24.0",
     "zustand": "catalog:"
   },
   "devDependencies": {
     "@pix/test-utils": "workspace:*",
     "@playwright/test": "catalog:",
     "@tailwindcss/vite": "catalog:",
+    "@tauri-apps/cli": "^2.10.0",
     "@types/node": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
-    "electron": "catalog:",
-    "electron-builder": "catalog:",
     "playwright": "catalog:",
     "tailwindcss": "catalog:",
     "typescript": "catalog:",
@@ -64,6 +72,6 @@
     "vite-plus": "catalog:"
   },
   "engines": {
-    "node": ">=22.19.0"
+    "node": ">=24.0.0"
   }
 }

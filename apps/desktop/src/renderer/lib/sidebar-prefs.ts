@@ -3,6 +3,8 @@ import { SHELL_SIDEBAR } from "./layout.ts";
 /** Fully tucked away — no icon rail; expand control is fixed after traffic lights. */
 export const SIDEBAR_COLLAPSED_WIDTH = 0;
 export const SIDEBAR_DEFAULT_TRANSLUCENT = true;
+/** Shared by the layout transition and the delayed removal of sidebar content. */
+export const SIDEBAR_MOTION_MS = 360;
 
 export function clampSidebarWidth(px: number): number {
   if (!Number.isFinite(px)) return SHELL_SIDEBAR.defaultPx;
@@ -11,6 +13,27 @@ export function clampSidebarWidth(px: number): number {
 
 export function sidebarRailWidth(collapsed: boolean, widthPx: number): number {
   return collapsed ? SIDEBAR_COLLAPSED_WIDTH : clampSidebarWidth(widthPx);
+}
+
+/** Keep enough room for conversation text, the composer, and settings controls. */
+export const SIDEBAR_CONTENT_MIN_PX = 600;
+export const SIDEBAR_COLLAPSE_AT_PX = SHELL_SIDEBAR.minPx + SIDEBAR_CONTENT_MIN_PX;
+const SIDEBAR_REOPEN_GAP_PX = 32;
+
+/** A small gap prevents repeated folding near the boundary while resizing or zooming. */
+export function isCompactSidebar(widthPx: number, wasCompact = false): boolean {
+  return widthPx < SIDEBAR_COLLAPSE_AT_PX + (wasCompact ? SIDEBAR_REOPEN_GAP_PX : 0);
+}
+
+export function responsiveSidebarWidth(
+  viewportWidthPx: number,
+  preferredWidthPx: number,
+  compact: boolean,
+): number {
+  const available = compact
+    ? Math.max(0, viewportWidthPx - 48)
+    : Math.max(SHELL_SIDEBAR.minPx, viewportWidthPx - SIDEBAR_CONTENT_MIN_PX);
+  return Math.min(clampSidebarWidth(preferredWidthPx), available);
 }
 
 /**

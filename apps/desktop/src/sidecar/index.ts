@@ -34,24 +34,12 @@ import {
   type UpsertCustomProviderInput,
   isHostEvent,
 } from "@pix/contracts";
-import {
-  app,
-  BrowserWindow,
-  clipboard,
-  dialog,
-  ipcMain,
-  Menu,
-  net,
-  nativeImage,
-  nativeTheme,
-  Notification,
-  protocol,
-  screen,
-  shell,
-  utilityProcess,
-  type NativeImage,
-  type UtilityProcess,
-} from "electron";
+import { app, dialog, shell } from "./native.ts";
+import { nativeImage, type NativeImage } from "./image.ts";
+import { rpc, renderer, nativeRequest, markReady, type RendererConnection } from "./transport.ts";
+import { setGlobalDispatcher, EnvHttpProxyAgent } from "undici";
+import { forkAgent } from "./agent-process.ts";
+import type { ChildProcess } from "node:child_process";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
@@ -67,7 +55,7 @@ import { homedir, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { setTimeout as delay } from "node:timers/promises";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import {
   findParkedSessionKeyByCwd,
   idleParkedCount,
@@ -77,15 +65,9 @@ import {
   pickParkedEvictionKey,
   shouldForwardParkedRuntimeEvent,
   shouldParkForeground,
-} from "./host-park-policy.ts";
-import {
-  formatHostExitError,
-  resolveAgentHostEntry,
-  sanitizeUtilityProcessEnv,
-} from "./host-spawn.ts";
-import { createAutoUpdateController, type AutoUpdateController } from "./auto-update.ts";
-import { ensureExtractedPiCli, piCliExtractDir } from "./pi-cli-extract.ts";
-import { ensurePiCli, type PiCliProgressEvent } from "./pi-cli-ensure.ts";
+} from "../main/host-park-policy.ts";
+import { formatHostExitError, resolveAgentHostEntry } from "../main/host-spawn.ts";
+import { ensurePiCli, type PiCliProgressEvent } from "../main/pi-cli-ensure.ts";
 import {
   buildPiSdkActivity,
   buildPiSdkStatus,
@@ -101,18 +83,17 @@ import {
   resolveGlobalSdk,
   type PiSdkPrefs,
   type ResolvedPiSdk,
-} from "./pi-sdk.ts";
-import { createNodePtySpawn, PiTuiPtyController } from "./pi-tui-pty.ts";
-import { PiTuiExclusiveGuard, planPiTuiLaunch } from "./pi-tui-session.ts";
+} from "../main/pi-sdk.ts";
+import { createNodePtySpawn, PiTuiPtyController } from "../main/pi-tui-pty.ts";
+import { PiTuiExclusiveGuard, planPiTuiLaunch } from "../main/pi-tui-session.ts";
 import {
   applyProxyChannelToEnv,
-  electronProxyConfig,
   normalizeProxyPrefs,
   withNodeEnvProxyFlag,
   type ProxyChannelPrefs,
   type ProxyPrefs,
-} from "./proxy-prefs.ts";
-import { discoverLocalProxies } from "./proxy-discover.ts";
+} from "../main/proxy-prefs.ts";
+import { discoverLocalProxies } from "../main/proxy-discover.ts";
 import {
   applyManagedRuntimeToProcessEnv,
   captureManagedPathBase,
@@ -120,17 +101,10 @@ import {
   getActiveBundledRuntimeStatus,
   normalizeBundledRuntimePrefs,
   type BundledRuntimePrefs,
-} from "./bundled-runtimes.ts";
-import { ensureProvisionedRuntimes } from "./runtime-provision.ts";
-import { augmentEnvPath } from "./shell-path.ts";
-import { ThemeLibrary } from "./theme-library.ts";
-
-protocol.registerSchemesAsPrivileged([
-  {
-    scheme: "pix-theme",
-    privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true },
-  },
-]);
+} from "../main/bundled-runtimes.ts";
+import { ensureProvisionedRuntimes } from "../main/runtime-provision.ts";
+import { augmentEnvPath } from "../main/shell-path.ts";
+import { ThemeLibrary } from "../main/theme-library.ts";
 
 /**
  * WorkBuddy-style managed runtimes:
@@ -163,8 +137,8 @@ function bootstrapBundledRuntimesAndPath(): void {
     userDataPath: userDataPath || join(homedir(), ".pix-runtimes-fallback"),
     mainModuleUrl: import.meta.url,
   };
-  if (typeof process.resourcesPath === "string" && process.resourcesPath) {
-    provisionOpts.resourcesPath = process.resourcesPath;
+  if (typeof process.env.PIX_RESOURCES_DIR === "string" && process.env.PIX_RESOURCES_DIR) {
+    provisionOpts.resourcesPath = process.env.PIX_RESOURCES_DIR;
   }
 
   let roots;
@@ -205,15 +179,6 @@ let piTuiControllerInit: Promise<PiTuiPtyController> | undefined;
 let appliedPiSdkSource: "builtin" | "global" = "builtin";
 let cachedBuiltinSdk: ResolvedPiSdk | undefined;
 let cachedGlobalSdk: ResolvedPiSdk | undefined;
-let piCliExtractInFlight: Promise<void> | undefined;
-
-function desktopUserDataPath(): string {
-  try {
-    return app.getPath("userData");
-  } catch {
-    return join(homedir(), ".pix-runtimes-fallback");
-  }
-}
 
 function resolveBuiltinSdkCached(): ResolvedPiSdk {
   if (cachedBuiltinSdk) return cachedBuiltinSdk;
@@ -228,40 +193,11 @@ function resolveBuiltinSdkCached(): ResolvedPiSdk {
   } catch {
     // app may not be ready
   }
-  if (typeof process.resourcesPath === "string" && process.resourcesPath) {
-    opts.resourcesPath = process.resourcesPath;
+  if (typeof process.env.PIX_RESOURCES_DIR === "string" && process.env.PIX_RESOURCES_DIR) {
+    opts.resourcesPath = process.env.PIX_RESOURCES_DIR;
   }
-  const extracted = piCliExtractDir(desktopUserDataPath());
-  if (existsSync(extracted)) opts.extractedRoot = extracted;
   cachedBuiltinSdk = resolveBuiltinSdk(opts);
   return cachedBuiltinSdk;
-}
-
-function ensurePiCliExtracted(): Promise<void> {
-  if (!app.isPackaged) return Promise.resolve();
-  if (piCliExtractInFlight) return piCliExtractInFlight;
-  piCliExtractInFlight = Promise.resolve()
-    .then(() => {
-      const resources =
-        typeof process.resourcesPath === "string" && process.resourcesPath
-          ? process.resourcesPath
-          : "";
-      if (!resources) return;
-      const result = ensureExtractedPiCli({
-        userDataPath: desktopUserDataPath(),
-        asarPath: join(resources, "app.asar"),
-      });
-      if (result?.extractedNow) {
-        cachedBuiltinSdk = undefined;
-        console.log(
-          `[pix] extracted builtin pi CLI ${result.version ?? ""} → ${result.root}`.trim(),
-        );
-      }
-    })
-    .catch((error) => {
-      console.warn("[pix] builtin pi CLI extract failed:", error);
-    });
-  return piCliExtractInFlight;
 }
 
 async function resolveGlobalSdkCached(force = false): Promise<ResolvedPiSdk> {
@@ -331,7 +267,6 @@ async function getPiTuiController(): Promise<PiTuiPtyController> {
   if (piTuiController) return piTuiController;
   if (!piTuiControllerInit) {
     piTuiControllerInit = (async () => {
-      await ensurePiCliExtracted();
       const spawn = await createNodePtySpawn();
       const controller = new PiTuiPtyController(spawn, async () => {
         const preference = getPiSdkPrefs();
@@ -363,7 +298,6 @@ const execFileAsync = promisify(execFile);
 const currentDirectory = dirname(fileURLToPath(import.meta.url));
 const HOST_EVENT_CHANNEL = "pix:host:event";
 const PI_PROGRESS_CHANNEL = "pix:pi:progress";
-const APP_UPDATE_CHANNEL = "pix:app:update-status";
 
 /** Best-effort branch / worktree labels for composer chrome (no git binary required). */
 function readGitContext(cwd: string | undefined): GitContextInfo {
@@ -1255,13 +1189,8 @@ function nativeImageToPngDataUrl(img: NativeImage): string | undefined {
 }
 
 async function fileIconDataUrl(filePath: string): Promise<string | undefined> {
-  try {
-    // Prefer large size for crisp 20px chips after downscale.
-    const img = await app.getFileIcon(filePath, { size: "large" });
-    return nativeImageToPngDataUrl(img);
-  } catch {
-    return undefined;
-  }
+  if (process.platform === "darwin") return qlmanageAppIconDataUrl(filePath);
+  return undefined;
 }
 
 /** Convert .icns/.png via macOS `sips` — more reliable than nativeImage for some ICNS. */
@@ -1790,7 +1719,7 @@ end tell`;
   await execFileAsync(found.target, [cwd], { windowsHide: true });
 }
 
-/** Restored BrowserWindow geometry (userData/pix-desktop.json). */
+/** Restored RendererConnection geometry (userData/pix-desktop.json). */
 interface WindowBoundsPrefs {
   x: number;
   y: number;
@@ -1855,8 +1784,6 @@ const WINDOW_MIN_HEIGHT = 560;
 const APP_SCALE_DEFAULT = 100;
 const APP_SCALE_MIN = 80;
 const APP_SCALE_MAX = 150;
-const WINDOW_DEFAULT_WIDTH = 1440;
-const WINDOW_DEFAULT_HEIGHT = 900;
 
 export type WorktreePrefs = {
   root: string;
@@ -2039,13 +1966,8 @@ function getAppScale(): number {
   return normalizeAppScale(loadDesktopPrefs().appScale);
 }
 
-function applyAppScale(win: BrowserWindow | null | undefined, scale: number): void {
-  if (!win || win.isDestroyed()) return;
-  try {
-    win.webContents.setZoomFactor(scale / 100);
-  } catch (error) {
-    console.warn("[pix] set app scale failed:", error);
-  }
+function applyAppScale(_win: RendererConnection | null | undefined, scale: number): void {
+  void nativeRequest("window.scale", { scale: scale / 100 }).catch((error) => console.warn(error));
 }
 
 function setAppScale(raw: unknown): number {
@@ -2120,80 +2042,6 @@ function normalizeWindowBoundsPrefs(raw: unknown): WindowBoundsPrefs | undefined
   };
 }
 
-/**
- * Ensure saved bounds still intersect some display (monitor unplugged, resolution change).
- * Returns options suitable for BrowserWindow constructor (+ optional maximize after show).
- */
-function resolveWindowCreateOptions(saved: WindowBoundsPrefs | undefined): {
-  x?: number;
-  y?: number;
-  width: number;
-  height: number;
-  isMaximized: boolean;
-} {
-  const width = saved?.width ?? WINDOW_DEFAULT_WIDTH;
-  const height = saved?.height ?? WINDOW_DEFAULT_HEIGHT;
-  const isMaximized = saved?.isMaximized === true;
-  if (saved === undefined) {
-    return { width, height, isMaximized: false };
-  }
-  try {
-    const area = { x: saved.x, y: saved.y, width, height };
-    const visible = screen.getAllDisplays().some((d) => {
-      const b = d.workArea;
-      return (
-        area.x < b.x + b.width &&
-        area.x + area.width > b.x &&
-        area.y < b.y + b.height &&
-        area.y + area.height > b.y
-      );
-    });
-    if (!visible) return { width, height, isMaximized: false };
-    return { x: saved.x, y: saved.y, width, height, isMaximized };
-  } catch {
-    return { width, height, isMaximized: false };
-  }
-}
-
-function persistMainWindowBounds(win: BrowserWindow): void {
-  if (win.isDestroyed()) return;
-  try {
-    // Prefer normal (unmaximized) bounds so restore after maximize still has size.
-    const bounds =
-      typeof win.getNormalBounds === "function" ? win.getNormalBounds() : win.getBounds();
-    const nextBounds: WindowBoundsPrefs = {
-      x: Math.round(bounds.x),
-      y: Math.round(bounds.y),
-      width: Math.max(WINDOW_MIN_WIDTH, Math.round(bounds.width)),
-      height: Math.max(WINDOW_MIN_HEIGHT, Math.round(bounds.height)),
-      ...(win.isMaximized() ? { isMaximized: true } : {}),
-    };
-    const prefs = loadDesktopPrefs();
-    saveDesktopPrefs({ ...prefs, window: nextBounds });
-  } catch {
-    // ignore
-  }
-}
-
-function attachWindowBoundsPersistence(win: BrowserWindow): void {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const schedule = () => {
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(() => {
-      timer = undefined;
-      persistMainWindowBounds(win);
-    }, 250);
-  };
-  win.on("resize", schedule);
-  win.on("move", schedule);
-  win.on("maximize", schedule);
-  win.on("unmaximize", schedule);
-  win.on("close", () => {
-    if (timer) clearTimeout(timer);
-    persistMainWindowBounds(win);
-  });
-}
-
 interface Deferred<T> {
   promise: Promise<T>;
   resolve(value: T): void;
@@ -2201,7 +2049,7 @@ interface Deferred<T> {
 }
 
 interface ActiveHost {
-  child: UtilityProcess;
+  child: ChildProcess;
   hostId: string;
   hello: Deferred<void>;
   exit: Deferred<number>;
@@ -2319,12 +2167,27 @@ function setProxyPrefs(next: ProxyPrefs): ProxyPrefs {
 /** Apply app-channel proxy to Chromium network stack only (not agent-host). */
 async function applyAppSessionProxy(channel?: ProxyChannelPrefs): Promise<void> {
   const prefs = channel ?? getProxyPrefs().app;
-  const config = electronProxyConfig(prefs);
-  try {
-    const { session } = await import("electron");
-    await session.defaultSession.setProxy(config);
-  } catch (error) {
-    console.warn("[pix] applyAppSessionProxy failed:", error);
+  // App HTTP requests execute in Node; the WebView only loads bundled frontend assets.
+  const next = applyProxyChannelToEnv({}, prefs, LAUNCH_ENV);
+  setGlobalDispatcher(
+    new EnvHttpProxyAgent({
+      httpProxy: next.HTTP_PROXY || next.http_proxy || "",
+      httpsProxy: next.HTTPS_PROXY || next.https_proxy || "",
+      noProxy: next.NO_PROXY || next.no_proxy || "",
+    }),
+  );
+  for (const key of [
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "no_proxy",
+  ]) {
+    if (next[key]) process.env[key] = next[key];
+    else delete process.env[key];
   }
 }
 
@@ -2386,7 +2249,7 @@ class HostSupervisor {
     return run;
   }
 
-  constructor(private readonly window: BrowserWindow) {
+  constructor(private readonly window: RendererConnection) {
     const prefs = loadDesktopPrefs();
     // Env fixture wins for isolated/e2e. Otherwise restore last durable workspace
     // (loadDesktopPrefs already falls back to first recent real project).
@@ -3386,7 +3249,7 @@ class HostSupervisor {
     } catch (error) {
       const code = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
       if (code !== "SESSION_IMPORT_CWD_MISSING" || cwdOverride) throw error;
-      if (this.window.isDestroyed()) return undefined;
+      if (this.window.isClosed()) return undefined;
       const picked = await dialog.showOpenDialog(this.window, {
         title: "Choose a workspace for the imported session",
         buttonLabel: "Use this workspace",
@@ -3469,7 +3332,7 @@ class HostSupervisor {
   }
 
   async exportSessionPick(format: "html" | "jsonl"): Promise<SessionExportResult | undefined> {
-    if (!mainWindow || mainWindow.isDestroyed()) return undefined;
+    if (!mainWindow || mainWindow.isClosed()) return undefined;
     const result = await dialog.showSaveDialog(mainWindow, {
       title: format === "html" ? "Export session HTML" : "Export session JSONL",
       defaultPath: format === "html" ? "session.html" : "session.jsonl",
@@ -3490,7 +3353,7 @@ class HostSupervisor {
       }
     | undefined
   > {
-    if (!mainWindow || mainWindow.isDestroyed()) return undefined;
+    if (!mainWindow || mainWindow.isClosed()) return undefined;
     const result = await dialog.showOpenDialog(mainWindow, {
       title: "Import session JSONL",
       properties: ["openFile"],
@@ -3771,7 +3634,7 @@ class HostSupervisor {
     const agentDir = await this.#resolveAgentDir();
     const { ensureModelsJsonTemplate } = await import("@pix/agent-runtime");
     const path = await ensureModelsJsonTemplate(agentDir);
-    shell.showItemInFolder(path);
+    await shell.showItemInFolder(path);
   }
 
   async setThinkingLevel(level: string): Promise<HostSnapshot> {
@@ -3946,7 +3809,7 @@ class HostSupervisor {
     if (!host || host.ignoreMessages || response.runtimeId !== this.#snapshot?.runtimeId) {
       throw new Error("Rejected stale Extension UI response");
     }
-    host.child.postMessage({
+    host.child.send({
       protocolVersion: IPC_PROTOCOL_VERSION,
       type: "extensionUi.respond",
       requestId: randomUUID(),
@@ -4037,11 +3900,7 @@ class HostSupervisor {
 
   #spawnWithEnv(env: Record<string, string>): ActiveHost {
     const hostEntry = resolveAgentHostEntry(currentDirectory);
-    const child = utilityProcess.fork(hostEntry, [], {
-      env: sanitizeUtilityProcessEnv(env),
-      serviceName: "Pix Agent Host",
-      stdio: "pipe",
-    });
+    const child = forkAgent(hostEntry, env);
     const host: ActiveHost = {
       child,
       hostId: randomUUID(),
@@ -4122,7 +3981,7 @@ class HostSupervisor {
                 : message.method === "input" || message.method === "editor"
                   ? "pix-test-input"
                   : undefined;
-          host.child.postMessage({
+          host.child.send({
             protocolVersion: IPC_PROTOCOL_VERSION,
             type: "extensionUi.respond",
             requestId: randomUUID(),
@@ -4168,9 +4027,8 @@ class HostSupervisor {
       const exitCode = code ?? -1;
       host.exit.resolve(exitCode);
       const finalize = () => this.#onHostProcessExit(host, exitCode);
-      // Unexpected exits often flush stderr after the exit event — wait a tick.
-      if (host.stopping) finalize();
-      else setTimeout(finalize, 50);
+      // Clear the dead host before resolving the next lifecycle RPC.
+      finalize();
     });
     return host;
   }
@@ -4262,14 +4120,14 @@ class HostSupervisor {
         timeout,
         commandType: command.type,
       });
-      host.child.postMessage(command);
+      host.child.send(command);
     });
   }
 
   #send(command: HostCommand): void {
     const host = this.#host;
     if (!host || host.ignoreMessages) throw new Error("Agent Host is not running");
-    host.child.postMessage(command);
+    host.child.send(command);
   }
 
   #resolvePendingFor(host: ActiveHost, message: HostEvent, parked: ParkedHost | undefined): void {
@@ -4307,7 +4165,7 @@ class HostSupervisor {
 
   #emit(event: HostEvent, count = true): void {
     if (count) this.#count(event.type);
-    if (!this.window.isDestroyed()) this.window.webContents.send(HOST_EVENT_CHANNEL, event);
+    if (!this.window.isClosed()) this.window.send(HOST_EVENT_CHANNEL, event);
   }
 
   #count(type: string): void {
@@ -4315,261 +4173,15 @@ class HostSupervisor {
   }
 }
 
-let mainWindow: BrowserWindow | undefined;
-let autoUpdate: AutoUpdateController | undefined;
+let mainWindow: RendererConnection | undefined;
 let supervisor: HostSupervisor | undefined;
 let themeLibrary: ThemeLibrary | undefined;
 
-/** App package root (apps/desktop) whether running from src or dist/main. */
-function packageRoot(): string {
-  // dist/main → ../.. ; file:// main might be nested differently
-  const fromDist = join(currentDirectory, "../..");
-  if (existsSync(join(fromDist, "package.json"))) return fromDist;
-  const fromNested = join(currentDirectory, "../../..");
-  if (existsSync(join(fromNested, "package.json"))) return fromNested;
-  return fromDist;
-}
-
-/**
- * Resolve the brand icon for window chrome / dock / notifications.
- *
- * Dev: apps/desktop/build/*
- * Packaged: extraResources next to app.asar (build/ is not inside asar).
- * Windows prefers .ico so the taskbar matches the executable.
- */
-function resolveAppIconPath(): string | undefined {
-  const root = packageRoot();
-  const resources =
-    typeof process.resourcesPath === "string" && process.resourcesPath
-      ? process.resourcesPath
-      : undefined;
-
-  const names =
-    process.platform === "win32"
-      ? (["icon.ico", "icon.png"] as const)
-      : process.platform === "darwin"
-        ? (["icon.png", "icon.icns"] as const)
-        : (["icon.png"] as const);
-
-  const dirs = [
-    ...(resources ? [resources, join(resources, "build")] : []),
-    join(root, "build"),
-    root,
-  ];
-
-  for (const dir of dirs) {
-    for (const name of names) {
-      const path = join(dir, name);
-      if (existsSync(path)) return path;
-    }
-  }
-  return undefined;
-}
-
-/** Windows AppUserModelID — must match electron-builder appId for packaged installs. */
-const WINDOWS_APP_USER_MODEL_ID = "dev.pix.app";
-/** Separate AUMID for unpackaged `electron .` so Start Menu Electron.lnk cannot steal the taskbar icon. */
-const WINDOWS_DEV_APP_USER_MODEL_ID = "dev.pix.app.dev";
-
-function applyWindowsAppUserModelId(): void {
-  if (process.platform !== "win32") return;
-  // Packaged Pix and dev Electron must NOT share an AUMID: Windows groups by AUMID and
-  // will show the Electron atom icon from Programs\Electron.lnk for the installed app.
-  app.setAppUserModelId(app.isPackaged ? WINDOWS_APP_USER_MODEL_ID : WINDOWS_DEV_APP_USER_MODEL_ID);
-}
-
-/**
- * macOS Dock icon — follow Apple HIG *App Icons* (not document icons):
- * https://developer.apple.com/design/human-interface-guidelines/app-icons
- *
- * Standard:
- * - Master canvas 1024×1024, square, full-bleed (fill the canvas).
- * - Do **not** pre-apply the rounded-rect mask, soft edges, or invent outer
- *   “safe margins”. The system applies the continuous corner mask + Dock
- *   scaling. (The ~10% margin / ~80% content guidance applies to *document*
- *   icons, not app icons.)
- *
- * Packaged: leave CFBundleIconFile / electron-builder `mac.icon` alone —
- * that is the supported path and matches other Mac apps.
- * Dev: Electron has no Pix .icns; set a square unmasked image only.
- */
-function applyDockIcon(iconPath: string | undefined): void {
-  if (process.platform !== "darwin" || !app.dock) return;
-  // Packaged builds ship a proper .icns; overriding via setIcon bypasses
-  // normal Dock treatment and was the source of “oversized” tiles.
-  if (app.isPackaged) return;
-  if (!iconPath) return;
-  const image = nativeImage.createFromPath(iconPath);
-  if (image.isEmpty()) {
-    console.warn("[pix] dock icon empty:", iconPath);
-    return;
-  }
-  try {
-    // Square only — no artificial inset. System mask matches HIG app icons.
-    const { width, height } = image.getSize();
-    const size = Math.max(width, height, 128);
-    const squared =
-      width === height && width >= 128
-        ? image
-        : image.resize({ width: size, height: size, quality: "best" });
-    app.dock.setIcon(squared);
-  } catch (error) {
-    console.warn("[pix] dock setIcon failed:", error);
-  }
-}
-
-/**
- * Product branding for About dialog, Dock, and window chrome (dev + packaged).
- * About panel needs an explicit iconPath or macOS falls back to Electron's icon.
- */
-function applyAppBranding(): void {
-  app.setName("Pix");
-  applyWindowsAppUserModelId();
-  const iconPath = resolveAppIconPath();
-  applyDockIcon(iconPath);
-  if (iconPath) {
-    try {
-      app.setAboutPanelOptions({
-        applicationName: "Pix",
-        applicationVersion: app.getVersion(),
-        version: app.getVersion(),
-        copyright: "Pix",
-        iconPath,
-      });
-    } catch (error) {
-      console.warn("[pix] setAboutPanelOptions failed:", error);
-    }
-  } else {
-    console.warn("[pix] app icon not found (build/ or process.resourcesPath)");
-  }
-}
-
-/** Keep in sync with apps/desktop/src/renderer/lib/desktop-chrome.ts TITLEBAR_HEIGHT_PX. */
-const TITLEBAR_HEIGHT_PX = 46;
-
-/** Match renderer `styles.css` shell backgrounds for titleBarOverlay / frame fill. */
-function titleBarChromeColors(): { color: string; symbolColor: string } {
-  if (nativeTheme.shouldUseDarkColors) {
-    return { color: "#191919", symbolColor: "#fafafa" };
-  }
-  return { color: "#ffffff", symbolColor: "#0a0a0a" };
-}
-
-/** Windows: native caption buttons sit in the custom titlebar via titleBarOverlay. */
-function applyWindowsTitleBarOverlay(win: BrowserWindow | null | undefined): void {
-  if (process.platform !== "win32" || !win || win.isDestroyed()) return;
-  if (typeof win.setTitleBarOverlay !== "function") return;
-  const { color, symbolColor } = titleBarChromeColors();
-  try {
-    win.setTitleBarOverlay({
-      color,
-      symbolColor,
-      height: TITLEBAR_HEIGHT_PX,
-    });
-  } catch (error) {
-    console.warn("[pix] setTitleBarOverlay failed:", error);
-  }
-}
-
-function applyNonMacWindowChrome(win: BrowserWindow | null | undefined): void {
-  if (!win || win.isDestroyed() || process.platform === "darwin") return;
-  const { color } = titleBarChromeColors();
-  try {
-    win.setBackgroundColor(color);
-  } catch {
-    // ignore
-  }
-  applyWindowsTitleBarOverlay(win);
-}
-
 async function createWindow(): Promise<void> {
-  // Keep in sync with apps/desktop/src/renderer/lib/desktop-chrome.ts (Synara-aligned).
-  const titlebarHeight = TITLEBAR_HEIGHT_PX;
-  const trafficDotRadius = 7;
-  const trafficLightPosition = {
-    x: 16,
-    y: Math.round(titlebarHeight / 2 - trafficDotRadius),
-  };
-
-  const iconPath = resolveAppIconPath();
-  applyAppBranding();
-
-  const desktopPrefs = loadDesktopPrefs();
-  const savedWindow = resolveWindowCreateOptions(desktopPrefs.window);
-  const chrome = titleBarChromeColors();
-
-  mainWindow = new BrowserWindow({
-    width: savedWindow.width,
-    height: savedWindow.height,
-    ...(savedWindow.x !== undefined && savedWindow.y !== undefined
-      ? { x: savedWindow.x, y: savedWindow.y }
-      : {}),
-    minWidth: WINDOW_MIN_WIDTH,
-    minHeight: WINDOW_MIN_HEIGHT,
-    title: "Pix",
-    show: false,
-    ...(iconPath ? { icon: iconPath } : {}),
-    // macOS: traffic lights in the sidebar titlebar + real sidebar vibrancy (true glass).
-    // Windows/Linux: frameless custom titlebar (hidden system title strip); drag via -webkit-app-region.
-    // Windows keeps native min/max/close via titleBarOverlay; Linux uses renderer caption buttons.
-    ...(process.platform === "darwin"
-      ? {
-          titleBarStyle: "hiddenInset" as const,
-          trafficLightPosition,
-          vibrancy: "sidebar" as const,
-          visualEffectState: "active" as const,
-          transparent: true,
-          backgroundColor: "#00000000",
-        }
-      : {
-          backgroundColor: chrome.color,
-          autoHideMenuBar: true,
-          titleBarStyle: "hidden" as const,
-          ...(process.platform === "win32"
-            ? {
-                titleBarOverlay: {
-                  color: chrome.color,
-                  symbolColor: chrome.symbolColor,
-                  height: titlebarHeight,
-                },
-              }
-            : {}),
-        }),
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      preload: join(currentDirectory, "..", "preload", "preload.cjs"),
-    },
-  });
-  applyAppScale(mainWindow, normalizeAppScale(desktopPrefs.appScale));
-  attachWindowBoundsPersistence(mainWindow);
-  const emitWindowState = () => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-    mainWindow.webContents.send("pix:window:state", {
-      isMaximized: mainWindow.isMaximized(),
-    });
-  };
-  mainWindow.on("maximize", emitWindowState);
-  mainWindow.on("unmaximize", emitWindowState);
-  mainWindow.once("ready-to-show", () => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-    if (savedWindow.isMaximized) mainWindow.maximize();
-    mainWindow.show();
-  });
-  supervisor = new HostSupervisor(mainWindow);
-  await mainWindow.loadFile(join(currentDirectory, "..", "renderer", "index.html"));
-  // Fallback if ready-to-show already fired before listener (rare on some platforms).
-  if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
-    if (savedWindow.isMaximized) mainWindow.maximize();
-    mainWindow.show();
-  }
+  mainWindow = renderer;
+  supervisor = new HostSupervisor(renderer);
+  applyAppScale(renderer, getAppScale());
 }
-
-// Identity early (before ready). Full branding (About icon/Dock) re-applied in whenReady.
-// On Windows this must run before the first window, or the shell keeps the wrong taskbar icon.
-applyWindowsAppUserModelId();
-app.setName("Pix");
 
 function openSystemNotificationSettings(): void {
   if (process.platform === "darwin") {
@@ -4591,1061 +4203,797 @@ function openSystemNotificationSettings(): void {
     .catch(() => undefined);
 }
 
-/** Keep Notification instances alive until closed (GC otherwise drops them before show). */
-const liveOsNotifications = new Set<InstanceType<typeof Notification>>();
-
-/**
- * macOS UNErrorDomain code 1 = notifications not allowed (permission denied / unsigned
- * Electron.app in dev). After a hard failure, cool down so agent.settled storms do not
- * spam the console.
- */
-let osNotificationBlockedUntil = 0;
-let osNotificationFailureLogged = false;
-const OS_NOTIFICATION_COOLDOWN_MS = 5 * 60_000;
-
 export type ShowOsNotificationPayload = {
   title: string;
   body?: string;
   silent?: boolean;
-  /** Always attempt (settings test). Bypasses cooldown so the user can re-test after fixing OS settings. */
   force?: boolean;
-  /** Skip when the main window is focused (checked in main — not renderer hasFocus). */
   requireUnfocused?: boolean;
 };
-
-function focusMainWindow(): void {
-  const win = mainWindow;
-  if (!win || win.isDestroyed()) return;
-  if (win.isMinimized()) win.restore();
-  win.show();
-  win.focus();
+function showOsNotification(payload: ShowOsNotificationPayload): Promise<boolean> {
+  return nativeRequest("notifications.show", payload);
 }
 
-function noteOsNotificationFailure(error: unknown): void {
-  osNotificationBlockedUntil = Date.now() + OS_NOTIFICATION_COOLDOWN_MS;
-  if (osNotificationFailureLogged) return;
-  osNotificationFailureLogged = true;
-  const detail =
-    error instanceof Error
-      ? error.message
-      : typeof error === "string"
-        ? error
-        : error == null
-          ? "unknown"
-          : "unknown";
-  const hint =
-    process.platform === "darwin"
-      ? " macOS blocked desktop notifications (permission denied or unsigned Electron in dev). " +
-        "Enable notifications for Electron/Pix in System Settings → Notifications, " +
-        "or use a packaged/signed build. Further failures are quiet for 5 minutes."
-      : " Desktop notifications failed; further failures are quiet for 5 minutes.";
-  console.warn(`[pix] notification failed: ${detail}.${hint}`);
-}
-
-/**
- * Post a desktop OS notification from the main process.
- * Returns whether the OS accepted/showed it (listens for `show` / `failed`).
- */
-async function showOsNotification(payload: ShowOsNotificationPayload): Promise<boolean> {
-  try {
-    if (!Notification.isSupported()) {
-      if (!osNotificationFailureLogged) {
-        osNotificationFailureLogged = true;
-        console.warn("[pix] notifications unsupported on this platform");
-      }
-      return false;
-    }
-    const title = payload?.title?.trim();
-    if (!title) return false;
-
-    // Skip while OS previously rejected us (unless settings "test" forces a retry).
-    if (!payload.force && Date.now() < osNotificationBlockedUntil) {
-      return false;
-    }
-
-    if (!payload.force && payload.requireUnfocused) {
-      const focused = Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused());
-      if (focused) return false;
-    }
-
-    // Some hosts suppress empty-body banners; always provide a body string.
-    const body = payload.body?.trim() || title;
-    const iconPath = resolveAppIconPath();
-    const options: Electron.NotificationConstructorOptions = {
-      title,
-      body,
-      silent: payload.silent === true,
-    };
-    // macOS uses the app bundle icon; Windows/Linux need an explicit path.
-    if (iconPath && process.platform !== "darwin") {
-      options.icon = iconPath;
-    }
-    if (process.platform === "linux") {
-      options.urgency = "normal";
-    }
-
-    const n = new Notification(options);
-    liveOsNotifications.add(n);
-
-    const drop = () => liveOsNotifications.delete(n);
-    n.once("close", drop);
-    n.once("click", () => {
-      focusMainWindow();
-      drop();
-    });
-
-    const shown = await new Promise<boolean>((resolve) => {
-      let settled = false;
-      const finish = (ok: boolean) => {
-        if (settled) return;
-        settled = true;
-        resolve(ok);
-      };
-      n.once("show", () => {
-        // Success: allow future notifications immediately.
-        osNotificationBlockedUntil = 0;
-        finish(true);
-      });
-      n.once("failed", (_event, error) => {
-        noteOsNotificationFailure(error);
-        drop();
-        finish(false);
-      });
-      // Linux / some macOS builds never emit `show`; treat no-failure as success.
-      setTimeout(() => finish(true), 800);
+void (async () => {
+  // Name + About/Dock icon (must be after ready for About panel iconPath on some builds).
+  themeLibrary = new ThemeLibrary(app.getPath("userData"));
+  await applyAppSessionProxy();
+  rpc.handle("pix:app:get-runtime", () => ({
+    platform: process.platform,
+    isPackaged: app.isPackaged,
+    enableTestCommands:
+      process.env.PIX_ENABLE_TEST_COMMANDS === "1" ||
+      process.env.PIX_ENABLE_TEST_COMMANDS === "true",
+    appVersion: app.getVersion(),
+    /** Windows uses native titleBarOverlay buttons; Linux needs renderer caption buttons. */
+    customWindowControls: process.platform !== "darwin",
+  }));
+  rpc.handle("pix:proxy:get", () => getProxyPrefs());
+  rpc.handle("pix:proxy:set", async (_event, next: unknown) => {
+    const prev = getProxyPrefs();
+    const saved = setProxyPrefs(normalizeProxyPrefs(next));
+    await applyAppSessionProxy(saved.app);
+    // AI proxy is applied at agent-host spawn; recycle host so new env takes effect.
+    if (JSON.stringify(prev.ai) !== JSON.stringify(saved.ai) && supervisor) {
       try {
-        n.show();
+        await supervisor.stop();
       } catch (error) {
-        noteOsNotificationFailure(error);
-        drop();
-        finish(false);
-      }
-    });
-
-    return shown;
-  } catch (error) {
-    noteOsNotificationFailure(error);
-    return false;
-  }
-}
-
-void app
-  .whenReady()
-  .then(async () => {
-    // Name + About/Dock icon (must be after ready for About panel iconPath on some builds).
-    applyAppBranding();
-    void ensurePiCliExtracted();
-    themeLibrary = new ThemeLibrary(app.getPath("userData"));
-    protocol.handle("pix-theme", async (request) => {
-      try {
-        const url = new URL(request.url);
-        const assetPath =
-          url.pathname === "/background" ? themeLibrary?.backgroundPath(url.hostname) : undefined;
-        if (!assetPath) return new Response("Not found", { status: 404 });
-        return net.fetch(pathToFileURL(assetPath).toString());
-      } catch {
-        return new Response("Not found", { status: 404 });
-      }
-    });
-    // App-channel proxy before any network from Chromium / main.
-    await applyAppSessionProxy();
-    // Default Electron File/Edit/View/Window menu is English-only and not product chrome.
-    // macOS keeps a minimal app menu (required for standard shortcuts / system UX).
-    if (process.platform === "darwin") {
-      Menu.setApplicationMenu(
-        Menu.buildFromTemplate([
-          {
-            role: "appMenu",
-          },
-          {
-            role: "editMenu",
-          },
-          {
-            role: "windowMenu",
-          },
-        ]),
-      );
-    } else {
-      Menu.setApplicationMenu(null);
-    }
-    ipcMain.handle("pix:app:get-runtime", () => ({
-      platform: process.platform,
-      isPackaged: app.isPackaged,
-      enableTestCommands:
-        process.env.PIX_ENABLE_TEST_COMMANDS === "1" ||
-        process.env.PIX_ENABLE_TEST_COMMANDS === "true",
-      appVersion: app.getVersion(),
-      /** Windows uses native titleBarOverlay buttons; Linux needs renderer caption buttons. */
-      customWindowControls: process.platform === "linux",
-    }));
-    ipcMain.handle("pix:app:get-update-status", () => {
-      if (!autoUpdate) {
-        return {
-          state: "idle" as const,
-          currentVersion: app.getVersion(),
-          canCheck: app.isPackaged,
-        };
-      }
-      return autoUpdate.getStatus();
-    });
-    ipcMain.handle("pix:app:check-for-updates", () => {
-      if (!autoUpdate) {
-        return {
-          state: "not-available" as const,
-          currentVersion: app.getVersion(),
-          canCheck: false,
-        };
-      }
-      return autoUpdate.checkForUpdates();
-    });
-    ipcMain.handle("pix:app:download-update", () => {
-      if (!autoUpdate) {
-        return {
-          state: "error" as const,
-          currentVersion: app.getVersion(),
-          canCheck: false,
-          error: "Auto-updater is not initialized",
-        };
-      }
-      return autoUpdate.downloadUpdate();
-    });
-    ipcMain.handle("pix:app:quit-and-install", () => {
-      autoUpdate?.quitAndInstall();
-    });
-    ipcMain.handle("pix:proxy:get", () => getProxyPrefs());
-    ipcMain.handle("pix:proxy:set", async (_event, next: unknown) => {
-      const prev = getProxyPrefs();
-      const saved = setProxyPrefs(normalizeProxyPrefs(next));
-      await applyAppSessionProxy(saved.app);
-      // AI proxy is applied at agent-host spawn; recycle host so new env takes effect.
-      if (JSON.stringify(prev.ai) !== JSON.stringify(saved.ai) && supervisor) {
-        try {
-          await supervisor.stop();
-        } catch (error) {
-          console.warn("[pix] stop host after AI proxy change failed:", error);
-        }
-      }
-      return saved;
-    });
-    ipcMain.handle("pix:proxy:discover-local", () => discoverLocalProxies());
-    ipcMain.handle("pix:window:minimize", () => {
-      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.minimize();
-    });
-    ipcMain.handle("pix:window:toggle-maximize", () => {
-      if (!mainWindow || mainWindow.isDestroyed()) return false;
-      if (mainWindow.isMaximized()) mainWindow.unmaximize();
-      else mainWindow.maximize();
-      return mainWindow.isMaximized();
-    });
-    ipcMain.handle("pix:window:close", () => {
-      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close();
-    });
-    ipcMain.handle("pix:window:is-maximized", () =>
-      Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isMaximized()),
-    );
-    ipcMain.handle("pix:appearance:set-theme-source", (_event, source: unknown) => {
-      if (source !== "light" && source !== "dark" && source !== "system") {
-        throw new Error("Invalid native theme source");
-      }
-      nativeTheme.themeSource = source;
-      applyNonMacWindowChrome(mainWindow);
-    });
-    ipcMain.handle("pix:appearance:get-app-scale", () => getAppScale());
-    ipcMain.handle("pix:appearance:set-app-scale", (_event, scale: unknown) => setAppScale(scale));
-    const requireThemeLibrary = (): ThemeLibrary => {
-      if (!themeLibrary) throw new Error("Theme library is not ready");
-      return themeLibrary;
-    };
-    ipcMain.handle("pix:themes:list", () => requireThemeLibrary().list());
-    ipcMain.handle("pix:themes:activate", (_event, id: unknown) =>
-      requireThemeLibrary().activate(id),
-    );
-    ipcMain.handle("pix:themes:save", (_event, input: unknown) =>
-      requireThemeLibrary().save(input),
-    );
-    ipcMain.handle("pix:themes:remove", (_event, id: unknown) => requireThemeLibrary().remove(id));
-    ipcMain.handle("pix:themes:import-pick", async () => {
-      if (!mainWindow) return undefined;
-      const result = await dialog.showOpenDialog(mainWindow, {
-        title: "Import Pix theme skin",
-        properties: ["openDirectory"],
-      });
-      if (result.canceled || !result.filePaths[0]) return undefined;
-      return requireThemeLibrary().importDirectory(result.filePaths[0]);
-    });
-    ipcMain.handle("pix:themes:export-pick", async (_event, id: unknown) => {
-      if (!mainWindow) return {};
-      const result = await dialog.showOpenDialog(mainWindow, {
-        title: "Export Pix theme skin",
-        properties: ["openDirectory", "createDirectory"],
-      });
-      if (result.canceled || !result.filePaths[0]) return {};
-      return { outputPath: requireThemeLibrary().exportDirectory(id, result.filePaths[0]) };
-    });
-    nativeTheme.on("updated", () => {
-      applyNonMacWindowChrome(mainWindow);
-    });
-
-    const broadcastPiProgress = (event: PiCliProgressEvent) => {
-      if (!mainWindow || mainWindow.isDestroyed()) return;
-      mainWindow.webContents.send(PI_PROGRESS_CHANNEL, event);
-    };
-    /** Detect global pi only (no npm install). Used at startup / bootstrap. */
-    const runDetectPiCli = async () => {
-      return ensurePiCli({ onProgress: broadcastPiProgress });
-    };
-    /** Explicit global install (Settings → Pi). */
-    const runInstallGlobalPiCli = async () => {
-      const result = await ensurePiCli({ onProgress: broadcastPiProgress, force: true });
-      // Fresh install only: gently re-read config. Do not force-kill a healthy host mid-start
-      // (that surfaces as "Agent Host exited with code 0" on Windows).
-      if (result.installedNow && supervisor) {
-        try {
-          await supervisor.start({ force: false });
-        } catch (error) {
-          console.warn("[pix] host refresh after pi install failed:", error);
-        }
-      }
-      cachedGlobalSdk = undefined;
-      void resolveGlobalSdkCached(true).catch(() => undefined);
-      return result;
-    };
-    ipcMain.handle("pix:pi:ensure", () => runDetectPiCli());
-    ipcMain.handle("pix:runtimes:get-status", () => getActiveBundledRuntimeStatus());
-    ipcMain.handle("pix:runtimes:set-prefs", (_event, raw: unknown) => {
-      const next = normalizeBundledRuntimePrefs(raw);
-      const prefs = loadDesktopPrefs();
-      saveDesktopPrefs({
-        ...prefs,
-        bundledRuntimes: {
-          useBundledNode: next.useBundledNode,
-          useBundledPython: next.useBundledPython,
-        },
-      });
-      configureBundledRuntimes({ prefs: next });
-      // Rebuild PATH from pre-managed base + clear/set isolation env for new prefs.
-      applyManagedRuntimeToProcessEnv(process.env);
-      return getActiveBundledRuntimeStatus();
-    });
-    ipcMain.handle("pix:pi-sdk:get-status", () => collectPiSdkStatus());
-    ipcMain.handle(
-      "pix:pi-sdk:set-source",
-      async (_event, source: unknown, options?: { force?: boolean }) => {
-        const next = normalizePiSdkSource(source);
-        const force = options?.force === true;
-        if (next === "global") {
-          const global = await resolveGlobalSdkCached(true);
-          if (!global.available) {
-            throw new Error(global.error || "Global pi SDK is not available");
-          }
-        }
-
-        const activity = collectPiSdkActivity();
-        if (activity.busy && !force) {
-          // Soft refuse: UI should confirm then retry with force.
-          throw new Error(formatPiSdkBusyError(activity));
-        }
-
-        setPiSdkPrefs({ source: next });
-        cachedGlobalSdk = await resolveGlobalSdkCached(true);
-
-        // Best-effort graceful abort before hard recycle when user forced through busy work.
-        if (activity.agentBusy && supervisor) {
-          try {
-            await supervisor.abort();
-          } catch {
-            // ignore — stop() will tear down regardless
-          }
-        }
-
-        // Dispose TUI so next open uses the new CLI path.
-        try {
-          piTuiController?.disposeAll();
-          piTuiGuard.release();
-        } catch {
-          // ignore
-        }
-
-        // Recycle Agent Host so module resolution picks the new package root.
-        // stop() also tears down parked generators (including busy parked sessions).
-        if (supervisor) {
-          try {
-            await supervisor.stop();
-            await supervisor.start({ force: true });
-          } catch (error) {
-            console.warn("[pix] host recycle after pi SDK switch failed:", error);
-          }
-        }
-        return collectPiSdkStatus();
-      },
-    );
-    ipcMain.handle("pix:pi-sdk:list-config-files", async () => {
-      let agentDir = defaultAgentDir();
-      try {
-        const snap = await supervisor?.snapshot();
-        if (snap?.agentDir) agentDir = snap.agentDir;
-      } catch {
-        // ignore
-      }
-      return listPiConfigFiles(agentDir);
-    });
-    ipcMain.handle("pix:pi-sdk:reveal-config", async (_event, id: unknown) => {
-      if (typeof id !== "string" || !id.trim()) throw new Error("Invalid config id");
-      let agentDir = defaultAgentDir();
-      try {
-        const snap = await supervisor?.snapshot();
-        if (snap?.agentDir) agentDir = snap.agentDir;
-      } catch {
-        // ignore
-      }
-      const entry = listPiConfigFiles(agentDir).find((f) => f.id === id);
-      if (!entry) throw new Error(`Unknown config id: ${id}`);
-      if (!entry.exists) throw new Error(`Config path does not exist: ${entry.path}`);
-      shell.showItemInFolder(entry.path);
-    });
-    ipcMain.handle("pix:pi-sdk:open-config", async (_event, id: unknown) => {
-      if (typeof id !== "string" || !id.trim()) throw new Error("Invalid config id");
-      let agentDir = defaultAgentDir();
-      try {
-        const snap = await supervisor?.snapshot();
-        if (snap?.agentDir) agentDir = snap.agentDir;
-      } catch {
-        // ignore
-      }
-      const entry = listPiConfigFiles(agentDir).find((f) => f.id === id);
-      if (!entry) throw new Error(`Unknown config id: ${id}`);
-      if (!entry.openable) throw new Error("This file cannot be opened from Pix (sensitive).");
-      if (!entry.exists) throw new Error(`Config path does not exist: ${entry.path}`);
-      const error = await shell.openPath(entry.path);
-      if (error) throw new Error(error);
-    });
-    ipcMain.handle("pix:pi-sdk:install-global", () => runInstallGlobalPiCli());
-    ipcMain.handle("pix:pi-sdk:check-latest", () => collectPiSdkStatus({ forceLatest: true }));
-
-    // Only resolve global package when user already prefers global SDK.
-    // Default builtin: skip global pi probe entirely at startup.
-    if (getPiSdkPrefs().source === "global") {
-      void resolveGlobalSdkCached(true).catch(() => undefined);
-    }
-
-    await createWindow();
-    autoUpdate = createAutoUpdateController({
-      broadcast: (status) => {
-        if (!mainWindow || mainWindow.isDestroyed()) return;
-        mainWindow.webContents.send(APP_UPDATE_CHANNEL, status);
-      },
-    });
-
-    ipcMain.handle(
-      "pix:host:start",
-      (_event, options?: { cwd?: string; sessionFile?: string; resumeRecent?: boolean }) =>
-        supervisor?.start(options),
-    );
-    ipcMain.handle("pix:host:snapshot", () => supervisor?.snapshot());
-    ipcMain.handle("pix:host:stop", () => {
-      piTuiController?.disposeAll();
-      piTuiGuard.release();
-      return supervisor?.stop();
-    });
-    ipcMain.handle("pix:workspace:get-cwd", () => supervisor?.getWorkspaceCwd());
-    ipcMain.handle("pix:workspace:list-recent", () => supervisor?.listRecentWorkspaces());
-    ipcMain.handle(
-      "pix:workspace:open-path",
-      (_event, cwd: string, options?: { resumeRecent?: boolean }) =>
-        supervisor?.openWorkspace(cwd, options),
-    );
-    ipcMain.handle("pix:workspace:remove-recent", (_event, cwd: string) =>
-      supervisor?.removeRecentWorkspace(cwd),
-    );
-    ipcMain.handle("pix:workspace:clear-active", () => supervisor?.clearActiveWorkspace());
-    ipcMain.handle("pix:workspace:get-git-context", (_event, cwd?: string) => {
-      const path =
-        typeof cwd === "string" && cwd.trim() ? cwd : (supervisor?.getWorkspaceCwd() ?? undefined);
-      return readGitContext(path);
-    });
-    ipcMain.handle("pix:workspace:list-git-branches", async (_event, cwd?: string) => {
-      const path = resolveWorkspaceCwd(cwd, supervisor?.getWorkspaceCwd());
-      return listGitBranches(path);
-    });
-    ipcMain.handle(
-      "pix:workspace:checkout-git-branch",
-      async (_event, branch: string, cwd?: string) => {
-        const path = resolveWorkspaceCwd(cwd, supervisor?.getWorkspaceCwd());
-        return checkoutGitBranch(path, branch);
-      },
-    );
-    ipcMain.handle(
-      "pix:workspace:create-git-branch",
-      async (_event, branch: string, options?: { checkout?: boolean; cwd?: string }) => {
-        const path = resolveWorkspaceCwd(options?.cwd, supervisor?.getWorkspaceCwd());
-        return createGitBranch(path, branch, options?.checkout !== false);
-      },
-    );
-    ipcMain.handle("pix:workspace:list-git-worktrees", async (_event, cwd?: string) => {
-      const path = resolveWorkspaceCwd(cwd, supervisor?.getWorkspaceCwd());
-      return listGitWorktrees(path);
-    });
-    ipcMain.handle("pix:workspace:list-managed-worktrees", async () => listAllManagedWorktrees());
-    ipcMain.handle(
-      "pix:workspace:create-git-worktree",
-      async (
-        _event,
-        options: {
-          path?: string;
-          branch?: string;
-          newBranch?: string;
-          name?: string;
-          cwd?: string;
-        },
-      ) => {
-        const path = resolveWorkspaceCwd(options?.cwd, supervisor?.getWorkspaceCwd());
-        return createGitWorktree(path, options);
-      },
-    );
-    ipcMain.handle(
-      "pix:workspace:remove-git-worktree",
-      async (_event, worktreePath: string, cwd?: string) => {
-        return removeGitWorktree(worktreePath, cwd);
-      },
-    );
-    ipcMain.handle("pix:workspace:get-worktree-prefs", (_event, cwd?: string) => {
-      const path =
-        typeof cwd === "string" && cwd.trim() ? cwd : (supervisor?.getWorkspaceCwd() ?? undefined);
-      return getWorktreePrefsView(path);
-    });
-    ipcMain.handle(
-      "pix:workspace:set-worktree-prefs",
-      (
-        _event,
-        patch: { rootConfigured?: string; autoDelete?: boolean; autoDeleteLimit?: number },
-      ) => setWorktreePrefs(patch ?? {}),
-    );
-    ipcMain.handle("pix:workspace:get-git-prefs", () => getGitPrefs());
-    ipcMain.handle(
-      "pix:workspace:set-git-prefs",
-      (
-        _event,
-        patch: {
-          branchPrefix?: string;
-          pullMode?: "merge" | "squash";
-          forcePush?: boolean;
-          draftPr?: boolean;
-          customCommitCommand?: string;
-          customPrCommand?: string;
-          modelProvider?: string;
-          modelId?: string;
-        },
-      ) => setGitPrefs(patch ?? {}),
-    );
-    ipcMain.handle("pix:workspace:reveal-in-folder", (_event, cwd: string) => {
-      if (typeof cwd === "string" && cwd.trim()) shell.showItemInFolder(cwd);
-    });
-    ipcMain.handle("pix:workspace:open-file", async (_event, path: string) => {
-      if (typeof path !== "string" || !path.trim()) throw new Error("Invalid file path");
-      const error = await shell.openPath(path);
-      if (error) throw new Error(error);
-    });
-    ipcMain.handle("pix:workspace:open-external", async (_event, url: string) => {
-      if (typeof url !== "string") throw new Error("Invalid external URL");
-      const protocol = new URL(url).protocol;
-      if (!new Set(["http:", "https:", "mailto:"]).has(protocol)) {
-        throw new Error(`Unsupported external URL protocol: ${protocol}`);
-      }
-      await shell.openExternal(url);
-    });
-    ipcMain.handle("pix:workspace:ensure-default", () => ensureDefaultWorkspacePath());
-    ipcMain.handle("pix:workspace:ensure-conversation", () => ensureConversationWorkspacePath());
-    ipcMain.handle("pix:workspace:git-status", async (_event, cwd?: string) => {
-      const path = resolveWorkspaceCwd(cwd, supervisor?.getWorkspaceCwd());
-      return gitStatus(path);
-    });
-    ipcMain.handle("pix:workspace:git-commit", async (_event, message: string, cwd?: string) => {
-      const path = resolveWorkspaceCwd(cwd, supervisor?.getWorkspaceCwd());
-      return gitCommit(path, message);
-    });
-    ipcMain.handle("pix:workspace:git-pull", async (_event, cwd?: string) => {
-      const path = resolveWorkspaceCwd(cwd, supervisor?.getWorkspaceCwd());
-      return gitPull(path);
-    });
-    ipcMain.handle("pix:workspace:git-push", async (_event, cwd?: string) => {
-      const path = resolveWorkspaceCwd(cwd, supervisor?.getWorkspaceCwd());
-      return gitPush(path);
-    });
-    ipcMain.handle(
-      "pix:workspace:git-commit-and-push",
-      async (_event, message: string, cwd?: string) => {
-        const path = resolveWorkspaceCwd(cwd, supervisor?.getWorkspaceCwd());
-        return gitCommitAndPush(path, message);
-      },
-    );
-    ipcMain.handle("pix:workspace:git-generate-commit-message", async (_event, cwd?: string) => {
-      const path = resolveWorkspaceCwd(cwd, supervisor?.getWorkspaceCwd());
-      return generateCommitMessage(path);
-    });
-    ipcMain.handle("pix:workspace:open-create-pr", async (_event, cwd?: string) => {
-      const path = resolveWorkspaceCwd(cwd, supervisor?.getWorkspaceCwd());
-      return openCreatePullRequest(path);
-    });
-    ipcMain.handle("pix:workspace:list-open-targets", async (_event, cwd?: string) => {
-      const path = resolveWorkspaceCwd(cwd, supervisor?.getWorkspaceCwd());
-      return listOpenTargets(path);
-    });
-    ipcMain.handle("pix:workspace:open-in-app", async (_event, appId: string, cwd?: string) => {
-      const path = resolveWorkspaceCwd(cwd, supervisor?.getWorkspaceCwd());
-      return openInApp(appId, path);
-    });
-    ipcMain.handle("pix:workspace:pick-folder", async () => {
-      if (!mainWindow) return undefined;
-      const result = await dialog.showOpenDialog(mainWindow, {
-        properties: ["openDirectory", "createDirectory"],
-      });
-      if (result.canceled || !result.filePaths[0]) return undefined;
-      return result.filePaths[0];
-    });
-    // Windows/Linux: Electron cannot open a dialog that is both a file picker and a
-    // directory picker. Combining openFile+openDirectory forces directory-only UI, so
-    // users could not select files. Callers pass mode explicitly.
-    ipcMain.handle(
-      "pix:workspace:pick-attachments",
-      async (_event, options?: { mode?: "files" | "folders" }) => {
-        if (!mainWindow) return [];
-        const mode = options?.mode === "folders" ? "folders" : "files";
-        const properties: Array<"openFile" | "openDirectory" | "multiSelections"> =
-          mode === "folders"
-            ? ["openDirectory", "multiSelections"]
-            : ["openFile", "multiSelections"];
-        const result = await dialog.showOpenDialog(mainWindow, {
-          properties,
-          // Keep the dialog on top of our frameless/custom window on Windows.
-          ...(process.platform === "win32"
-            ? { title: mode === "folders" ? "选择文件夹" : "选择文件" }
-            : {}),
-        });
-        return result.canceled ? [] : result.filePaths;
-      },
-    );
-    ipcMain.handle(
-      "pix:workspace:search-paths",
-      async (_event, query?: string, options?: { cwd?: string; limit?: number }) => {
-        const fromOpts =
-          typeof options?.cwd === "string" && options.cwd.trim() ? options.cwd.trim() : undefined;
-        const resolved = fromOpts ?? supervisor?.getWorkspaceCwd();
-        if (!resolved || !existsSync(resolved)) return [];
-        return searchWorkspacePaths(
-          resolved,
-          typeof query === "string" ? query : "",
-          options?.limit ?? 24,
-        );
-      },
-    );
-    ipcMain.handle(
-      "pix:workspace:save-clipboard-image",
-      async (_event, options?: { bytes?: number[]; ext?: string }) => {
-        const dir = join(app.getPath("temp"), "pix-attachments");
-        mkdirSync(dir, { recursive: true });
-        let buffer: Buffer | undefined;
-        let ext =
-          typeof options?.ext === "string" && options.ext.trim() ? options.ext.trim() : "png";
-        if (Array.isArray(options?.bytes) && options.bytes.length > 0) {
-          buffer = Buffer.from(options.bytes);
-        } else {
-          const image = clipboard.readImage();
-          if (image.isEmpty()) return undefined;
-          buffer = image.toPNG();
-          ext = "png";
-        }
-        if (!buffer || buffer.length === 0) return undefined;
-        const filePath = join(dir, `paste-${Date.now()}.${ext.replace(/^\./, "")}`);
-        writeFileSync(filePath, buffer);
-        return filePath;
-      },
-    );
-    /** Local image → data-URL. Default maxEdge 160 (chips); pass a larger edge for timeline display. */
-    ipcMain.handle(
-      "pix:workspace:read-attachment-preview",
-      async (_event, filePath?: string, options?: { maxEdge?: number }) => {
-        if (typeof filePath !== "string" || !filePath.trim()) return undefined;
-        const abs = isAbsolute(filePath) ? resolve(filePath) : resolve(filePath);
-        if (!existsSync(abs)) return undefined;
-        try {
-          if (!lstatSync(abs).isFile()) return undefined;
-        } catch {
-          return undefined;
-        }
-        const ext = abs.slice(abs.lastIndexOf(".")).toLowerCase();
-        if (
-          ![
-            ".png",
-            ".jpg",
-            ".jpeg",
-            ".gif",
-            ".webp",
-            ".svg",
-            ".bmp",
-            ".tif",
-            ".tiff",
-            ".heic",
-            ".avif",
-          ].includes(ext)
-        ) {
-          return undefined;
-        }
-        const requested = typeof options?.maxEdge === "number" ? options.maxEdge : 160;
-        const maxEdge = Math.min(2048, Math.max(32, Math.round(requested)));
-        const maxBytes = maxEdge > 320 ? 12_000_000 : 1_500_000;
-        const originalMime =
-          ext === ".gif"
-            ? "image/gif"
-            : ext === ".webp"
-              ? "image/webp"
-              : ext === ".svg"
-                ? "image/svg+xml"
-                : undefined;
-        try {
-          // Keep GIF/WebP/SVG bytes so animation and vectors survive (nativeImage → PNG does not).
-          if (originalMime && (ext === ".gif" || ext === ".svg" || maxEdge > 320)) {
-            const raw = readFileSync(abs);
-            if (raw.length && raw.length <= maxBytes) {
-              return `data:${originalMime};base64,${raw.toString("base64")}`;
-            }
-            if (ext === ".gif" || ext === ".svg") return undefined;
-          }
-          const image = nativeImage.createFromPath(abs);
-          if (image.isEmpty()) return undefined;
-          const { width, height } = image.getSize();
-          let out = image;
-          if (width > maxEdge || height > maxEdge) {
-            const scale = Math.min(maxEdge / Math.max(width, 1), maxEdge / Math.max(height, 1));
-            out = image.resize({
-              width: Math.max(1, Math.round(width * scale)),
-              height: Math.max(1, Math.round(height * scale)),
-              quality: "good",
-            });
-          }
-          const png = out.toPNG();
-          if (!png.length || png.length > maxBytes) return undefined;
-          return `data:image/png;base64,${png.toString("base64")}`;
-        } catch {
-          return undefined;
-        }
-      },
-    );
-    ipcMain.handle("pix:trust:get", () => supervisor?.getTrust());
-    ipcMain.handle("pix:trust:set", (_event, trusted: boolean) => supervisor?.setTrust(trusted));
-    ipcMain.handle("pix:models:list", () => supervisor?.listModels());
-    ipcMain.handle("pix:models:set", (_event, provider: string, id: string) =>
-      supervisor?.setModel(provider, id),
-    );
-    ipcMain.handle("pix:models:get-config", () => supervisor?.getModelsJsonConfig());
-    ipcMain.handle("pix:models:upsert-custom", (_event, input: UpsertCustomProviderInput) =>
-      supervisor?.upsertCustomProvider(input),
-    );
-    ipcMain.handle("pix:models:remove-custom", (_event, provider: string) =>
-      supervisor?.removeCustomProvider(provider),
-    );
-    ipcMain.handle("pix:models:remove-custom-model", (_event, provider: string, modelId: string) =>
-      supervisor?.removeCustomModel(provider, modelId),
-    );
-    ipcMain.handle("pix:models:open-config", () => supervisor?.openModelsJson());
-    ipcMain.handle("pix:models:reveal-config", () => supervisor?.revealModelsJson());
-    ipcMain.handle("pix:thinking:set", (_event, level: string) =>
-      supervisor?.setThinkingLevel(level),
-    );
-    ipcMain.handle("pix:service-tier:set", (_event, tier: string) =>
-      supervisor?.setServiceTier(tier),
-    );
-    ipcMain.handle("pix:providers:list", () => supervisor?.listProviders());
-    ipcMain.handle("pix:providers:usage", () => supervisor?.listProviderUsage());
-    ipcMain.handle("pix:providers:set-api-key", (_event, provider: string, apiKey: string) =>
-      supervisor?.setProviderApiKey(provider, apiKey),
-    );
-    ipcMain.handle("pix:providers:clear-auth", (_event, provider: string) =>
-      supervisor?.clearProviderAuth(provider),
-    );
-    ipcMain.handle("pix:providers:oauth-start", (_event, provider: string, operationId?: string) =>
-      supervisor?.startProviderOAuth(provider, operationId),
-    );
-    ipcMain.handle(
-      "pix:providers:oauth-respond",
-      (_event, operationId: string, promptId: string, value?: string, cancelled?: boolean) =>
-        supervisor?.respondProviderOAuth(operationId, promptId, value, cancelled),
-    );
-    ipcMain.handle("pix:providers:oauth-cancel", (_event, operationId: string) =>
-      supervisor?.cancelProviderOAuth(operationId),
-    );
-    ipcMain.handle("pix:settings:get", () => supervisor?.getPiSettings());
-    ipcMain.handle("pix:settings:patch", (_event, patch: PiSettingsPatch) =>
-      supervisor?.patchPiSettings(patch),
-    );
-    ipcMain.handle(
-      "pix:agent:prompt",
-      async (
-        _event,
-        message: string,
-        streamingBehavior?: "steer" | "followUp",
-        imagePaths?: string[],
-      ) => {
-        // A warm TUI for this session must stop before the Host writes the same JSONL.
-        // Other parked sessions remain isolated and can be promoted later.
-        const sessionFile = supervisor?.activeSessionFile();
-        if (sessionFile && piTuiController?.disposeSession(sessionFile)) {
-          piTuiGuard.release(sessionFile);
-        } else if (!sessionFile && piTuiController?.isAlive()) {
-          piTuiController.dispose();
-          piTuiGuard.release();
-        }
-        piTuiGuard.assertHostPromptAllowed();
-        return supervisor?.prompt(message, streamingBehavior, imagePaths);
-      },
-    );
-
-    // ── Embedded pi TUI (real PTY; contentMode terminal) ─────────────────────
-    ipcMain.handle(
-      "pix:terminal:open",
-      async (
-        _event,
-        options: { sessionFile: string; cwd: string; cols?: number; rows?: number },
-      ) => {
-        if (
-          !options ||
-          typeof options.sessionFile !== "string" ||
-          typeof options.cwd !== "string"
-        ) {
-          throw new Error("terminal.open requires sessionFile and cwd");
-        }
-        const plan = planPiTuiLaunch({
-          sessionFile: options.sessionFile,
-          cwd: options.cwd,
-          ...(typeof options.cols === "number" ? { cols: options.cols } : {}),
-          ...(typeof options.rows === "number" ? { rows: options.rows } : {}),
-        });
-        const controller = await getPiTuiController();
-        // Always transfer exclusive ownership on open. tryAcquire-only failed after
-        // the first session when guard/controller keys desynced (macOS /private/var
-        // vs /var, or suspend/cancel races) — UI then could not open any later TUI.
-        const acquired = piTuiGuard.transferTo(plan.sessionKey);
-        if (!acquired.ok) throw new Error(acquired.reason);
-
-        try {
-          const send = (channel: string, payload: unknown) => {
-            if (!mainWindow || mainWindow.isDestroyed()) return;
-            mainWindow.webContents.send(channel, payload);
-          };
-          const opened = await controller.open(plan, {
-            // Tag every stream event. Electron can deliver a queued event from the
-            // disposed PTY after the next session has already mounted.
-            onData: (data) => send("pix:terminal:data", { data, sessionFile: plan.sessionFile }),
-            onExit: (event) => {
-              piTuiGuard.release(plan.sessionKey);
-              send("pix:terminal:exit", { ...event, sessionFile: plan.sessionFile });
-            },
-          });
-          return {
-            sessionFile: opened.sessionFile,
-            cwd: opened.cwd,
-            resumed: opened.resumed,
-          };
-        } catch (error) {
-          piTuiGuard.release(plan.sessionKey);
-          throw error;
-        }
-      },
-    );
-    ipcMain.handle("pix:terminal:write", async (_event, data: string) => {
-      const controller = await getPiTuiController();
-      controller.write(typeof data === "string" ? data : String(data ?? ""));
-    });
-    ipcMain.handle("pix:terminal:resize", async (_event, cols: number, rows: number) => {
-      const controller = await getPiTuiController();
-      controller.resize(Number(cols) || 80, Number(rows) || 24);
-    });
-    ipcMain.handle("pix:terminal:suspend", async () => {
-      if (!piTuiController?.isAlive()) {
-        piTuiGuard.release();
-        return {};
-      }
-      const { sessionFile } = piTuiController.suspend();
-      // Release exclusive lock so chat can prompt (prompt path disposes suspended TUI).
-      piTuiGuard.release();
-      return sessionFile ? { sessionFile } : {};
-    });
-    ipcMain.handle("pix:terminal:dispose", async () => {
-      if (!piTuiController) {
-        piTuiGuard.release();
-        return {};
-      }
-      const { sessionFile } = piTuiController.dispose();
-      piTuiGuard.release();
-      return sessionFile ? { sessionFile } : {};
-    });
-    ipcMain.handle("pix:terminal:status", async () => {
-      if (!piTuiController) {
-        return { open: false, parkedSessionFiles: [], sessionCount: 0 };
-      }
-      const status = piTuiController.status();
-      const sessionFile = status.live?.sessionFile;
-      return {
-        open: piTuiController.isOpen(),
-        suspended: piTuiController.isSuspended(),
-        ...(sessionFile ? { sessionFile } : {}),
-        parkedSessionFiles: status.parkedSessionFiles,
-        sessionCount: status.parkedSessionFiles.length + (status.live ? 1 : 0),
-      };
-    });
-    ipcMain.handle("pix:agent:queue-clear", () => supervisor?.clearQueue());
-    ipcMain.handle("pix:agent:abort", () => supervisor?.abort());
-    ipcMain.handle("pix:session:list", () => supervisor?.listSessions());
-    ipcMain.handle("pix:session:list-for-cwd", async (_event, cwd: string) => {
-      if (typeof cwd !== "string" || !cwd.trim()) return [];
-      const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
-      const requested = norm(cwd);
-      // When this cwd is the live host workspace, prefer host listSessions — it merges
-      // the in-memory session that pi has not flushed to disk yet (no assistant msg).
-      // Disk-only list would drop brand-new conversations from the sidebar.
-      //
-      // Re-check cwd after await: rapid project「新建会话」can switch the host mid-list
-      // and would otherwise return the *new* project's sessions under the requested cwd
-      // (wiping the 对话 rail when those rows are filtered by project cwd).
-      try {
-        const current = supervisor?.getWorkspaceCwd();
-        if (current && norm(current) === requested) {
-          const listed = await supervisor?.listSessions();
-          const still = supervisor?.getWorkspaceCwd();
-          if (listed && still && norm(still) === requested) {
-            return listed.threads.filter((thread) => {
-              const threadCwd = (thread.cwd || "").trim();
-              if (!threadCwd) return true;
-              return norm(threadCwd) === requested;
-            });
-          }
-        }
-      } catch {
-        // host may be stopped — fall through to disk scan
-      }
-      // Import agent-runtime (pi stays external in the main bundle — see vite.main.config).
-      const { listProjectSessions } = await import("@pix/agent-runtime");
-      return listProjectSessions(cwd);
-    });
-    ipcMain.handle("pix:session:new", () => supervisor?.newSession());
-    ipcMain.handle("pix:session:create-blank", () => supervisor?.createBlankConversation());
-    ipcMain.handle("pix:session:switch", (_event, sessionPath: string) =>
-      supervisor?.switchSession(sessionPath),
-    );
-    ipcMain.handle("pix:session:fork", (_event, entryId?: string) =>
-      supervisor?.forkSession(entryId),
-    );
-    ipcMain.handle("pix:session:tree", () => supervisor?.sessionTree());
-    ipcMain.handle(
-      "pix:session:navigate-tree",
-      (_event, targetId: string, options?: { summarize?: boolean; customInstructions?: string }) =>
-        supervisor?.navigateSessionTree(targetId, options),
-    );
-    ipcMain.handle("pix:session:compact", (_event, instructions?: string) =>
-      supervisor?.compactSession(instructions),
-    );
-    ipcMain.handle("pix:session:set-name", (_event, name: string) =>
-      supervisor?.setSessionName(name),
-    );
-    ipcMain.handle("pix:session:clone", () => supervisor?.cloneSession());
-    ipcMain.handle("pix:session:info", () => supervisor?.sessionInfo());
-    ipcMain.handle("pix:session:export", (_event, format: "html" | "jsonl", outputPath?: string) =>
-      supervisor?.exportSession(format, outputPath),
-    );
-    ipcMain.handle("pix:session:export-pick", (_event, format: "html" | "jsonl") =>
-      supervisor?.exportSessionPick(format),
-    );
-    ipcMain.handle("pix:session:import", (_event, inputPath: string) =>
-      supervisor?.importSession(inputPath),
-    );
-    ipcMain.handle("pix:session:import-pick", () => supervisor?.importSessionPick());
-    ipcMain.handle(
-      "pix:session:bash",
-      (_event, command: string, options?: { excludeFromContext?: boolean }) =>
-        supervisor?.sessionBash(command, options),
-    );
-    ipcMain.handle("pix:session:copy-last", () => supervisor?.copyLastAssistant());
-    ipcMain.handle("pix:session:share", () => supervisor?.shareSession());
-    ipcMain.handle("pix:runtime:reload", () => supervisor?.reloadRuntime());
-    ipcMain.handle("pix:models:list-scoped", () => supervisor?.listScopedModels());
-    ipcMain.handle("pix:models:refresh-catalog", () => supervisor?.refreshModelCatalog());
-    ipcMain.handle("pix:packages:list", () => supervisor?.listPackages());
-    ipcMain.handle(
-      "pix:packages:install",
-      (_event, source: string, scope: "global" | "project", options?: { temporary?: boolean }) =>
-        supervisor?.installPackage(source, scope, options),
-    );
-    ipcMain.handle(
-      "pix:packages:set-enabled",
-      (_event, source: string, scope: "global" | "project", enabled: boolean) =>
-        supervisor?.setPackageEnabled(source, scope, enabled),
-    );
-    ipcMain.handle("pix:packages:remove", (_event, source: string, scope: "global" | "project") =>
-      supervisor?.removePackage(source, scope),
-    );
-    ipcMain.handle("pix:packages:update", (_event, source?: string) =>
-      supervisor?.updatePackage(source),
-    );
-    ipcMain.handle("pix:packages:check-updates", () => supervisor?.checkPackageUpdates());
-    ipcMain.handle(
-      "pix:packages:search-catalog",
-      (_event, query?: string, size?: number, from?: number) =>
-        searchPiPackageCatalog(query, size, from),
-    );
-    ipcMain.handle("pix:resources:list", () => supervisor?.listResources());
-    ipcMain.handle("pix:extension-ui:respond", (_event, response: ExtensionUiResponse) =>
-      supervisor?.extensionUiRespond(response),
-    );
-    if (process.env.PIX_ENABLE_TEST_COMMANDS === "1") {
-      ipcMain.handle("pix:test:crash-host", () => supervisor?.crashHost());
-    }
-
-    ipcMain.handle("pix:notifications:show", (_event, payload: ShowOsNotificationPayload) =>
-      showOsNotification(payload ?? { title: "" }),
-    );
-    ipcMain.handle("pix:notifications:open-system-settings", () => {
-      openSystemNotificationSettings();
-    });
-
-    if (process.env.PIX_NO_AUTO_RESUME !== "1" && supervisor) {
-      // Product cold start: restore last durable workspace and continue recent pi session.
-      // Skip ephemeral fixture paths and missing directories.
-      const cwd = durableWorkspacePath(supervisor.getWorkspaceCwd());
-      if (cwd) {
-        try {
-          const snapshot = await supervisor.start({
-            cwd,
-            resumeRecent: true,
-            force: true,
-          });
-          console.log(
-            JSON.stringify({
-              type: "pix.m2.auto_resume",
-              cwd: snapshot.cwd,
-              sessionId: snapshot.sessionId,
-              sessionFile: snapshot.sessionFile,
-            }),
-          );
-        } catch (error) {
-          console.warn("Pix auto-resume skipped", error);
-        }
+        console.warn("[pix] stop host after AI proxy change failed:", error);
       }
     }
-  })
-  .catch((error: unknown) => {
-    console.error("Pix failed to initialize", error);
-    app.exit(1);
+    return saved;
+  });
+  rpc.handle("pix:proxy:discover-local", () => discoverLocalProxies());
+  rpc.handle("pix:appearance:set-theme-source", (_event, source: unknown) => {
+    if (source !== "light" && source !== "dark" && source !== "system")
+      throw new Error("Invalid native theme source");
+    return nativeRequest("window.theme", { source });
+  });
+  rpc.handle("pix:appearance:get-app-scale", () => getAppScale());
+  rpc.handle("pix:appearance:set-app-scale", (_event, scale: unknown) => setAppScale(scale));
+  const requireThemeLibrary = (): ThemeLibrary => {
+    if (!themeLibrary) throw new Error("Theme library is not ready");
+    return themeLibrary;
+  };
+  rpc.handle("pix:themes:list", () => requireThemeLibrary().list());
+  rpc.handle("pix:themes:activate", (_event, id: unknown) => requireThemeLibrary().activate(id));
+  rpc.handle("pix:themes:save", (_event, input: unknown) => requireThemeLibrary().save(input));
+  rpc.handle("pix:themes:remove", (_event, id: unknown) => requireThemeLibrary().remove(id));
+  rpc.handle("pix:themes:import-pick", async () => {
+    if (!mainWindow) return undefined;
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: "Import Pix theme skin",
+      properties: ["openDirectory"],
+    });
+    if (result.canceled || !result.filePaths[0]) return undefined;
+    return requireThemeLibrary().importDirectory(result.filePaths[0]);
+  });
+  rpc.handle("pix:themes:export-pick", async (_event, id: unknown) => {
+    if (!mainWindow) return {};
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: "Export Pix theme skin",
+      properties: ["openDirectory", "createDirectory"],
+    });
+    if (result.canceled || !result.filePaths[0]) return {};
+    return { outputPath: requireThemeLibrary().exportDirectory(id, result.filePaths[0]) };
   });
 
-app.on("before-quit", (event) => {
-  autoUpdate?.dispose();
-  autoUpdate = undefined;
-  piTuiController?.disposeAll();
-  piTuiGuard.release();
-  if (!supervisor) return;
-  event.preventDefault();
-  const activeSupervisor = supervisor;
-  supervisor = undefined;
-  void activeSupervisor.stop().finally(() => app.exit(0));
-});
+  const broadcastPiProgress = (event: PiCliProgressEvent) => {
+    if (!mainWindow || mainWindow.isClosed()) return;
+    mainWindow.send(PI_PROGRESS_CHANNEL, event);
+  };
+  /** Detect global pi only (no npm install). Used at startup / bootstrap. */
+  const runDetectPiCli = async () => {
+    return ensurePiCli({ onProgress: broadcastPiProgress });
+  };
+  /** Explicit global install (Settings → Pi). */
+  const runInstallGlobalPiCli = async () => {
+    const result = await ensurePiCli({ onProgress: broadcastPiProgress, force: true });
+    // Fresh install only: gently re-read config. Do not force-kill a healthy host mid-start
+    // (that surfaces as "Agent Host exited with code 0" on Windows).
+    if (result.installedNow && supervisor) {
+      try {
+        await supervisor.start({ force: false });
+      } catch (error) {
+        console.warn("[pix] host refresh after pi install failed:", error);
+      }
+    }
+    cachedGlobalSdk = undefined;
+    void resolveGlobalSdkCached(true).catch(() => undefined);
+    return result;
+  };
+  rpc.handle("pix:pi:ensure", () => runDetectPiCli());
+  rpc.handle("pix:runtimes:get-status", () => getActiveBundledRuntimeStatus());
+  rpc.handle("pix:runtimes:set-prefs", (_event, raw: unknown) => {
+    const next = normalizeBundledRuntimePrefs(raw);
+    const prefs = loadDesktopPrefs();
+    saveDesktopPrefs({
+      ...prefs,
+      bundledRuntimes: {
+        useBundledNode: next.useBundledNode,
+        useBundledPython: next.useBundledPython,
+      },
+    });
+    configureBundledRuntimes({ prefs: next });
+    // Rebuild PATH from pre-managed base + clear/set isolation env for new prefs.
+    applyManagedRuntimeToProcessEnv(process.env);
+    return getActiveBundledRuntimeStatus();
+  });
+  rpc.handle("pix:pi-sdk:get-status", () => collectPiSdkStatus());
+  rpc.handle(
+    "pix:pi-sdk:set-source",
+    async (_event, source: unknown, options?: { force?: boolean }) => {
+      const next = normalizePiSdkSource(source);
+      const force = options?.force === true;
+      if (next === "global") {
+        const global = await resolveGlobalSdkCached(true);
+        if (!global.available) {
+          throw new Error(global.error || "Global pi SDK is not available");
+        }
+      }
 
-app.on("window-all-closed", () => app.quit());
+      const activity = collectPiSdkActivity();
+      if (activity.busy && !force) {
+        // Soft refuse: UI should confirm then retry with force.
+        throw new Error(formatPiSdkBusyError(activity));
+      }
+
+      setPiSdkPrefs({ source: next });
+      cachedGlobalSdk = await resolveGlobalSdkCached(true);
+
+      // Best-effort graceful abort before hard recycle when user forced through busy work.
+      if (activity.agentBusy && supervisor) {
+        try {
+          await supervisor.abort();
+        } catch {
+          // ignore — stop() will tear down regardless
+        }
+      }
+
+      // Dispose TUI so next open uses the new CLI path.
+      try {
+        piTuiController?.disposeAll();
+        piTuiGuard.release();
+      } catch {
+        // ignore
+      }
+
+      // Recycle Agent Host so module resolution picks the new package root.
+      // stop() also tears down parked generators (including busy parked sessions).
+      if (supervisor) {
+        try {
+          await supervisor.stop();
+          await supervisor.start({ force: true });
+        } catch (error) {
+          console.warn("[pix] host recycle after pi SDK switch failed:", error);
+        }
+      }
+      return collectPiSdkStatus();
+    },
+  );
+  rpc.handle("pix:pi-sdk:list-config-files", async () => {
+    let agentDir = defaultAgentDir();
+    try {
+      const snap = await supervisor?.snapshot();
+      if (snap?.agentDir) agentDir = snap.agentDir;
+    } catch {
+      // ignore
+    }
+    return listPiConfigFiles(agentDir);
+  });
+  rpc.handle("pix:pi-sdk:reveal-config", async (_event, id: unknown) => {
+    if (typeof id !== "string" || !id.trim()) throw new Error("Invalid config id");
+    let agentDir = defaultAgentDir();
+    try {
+      const snap = await supervisor?.snapshot();
+      if (snap?.agentDir) agentDir = snap.agentDir;
+    } catch {
+      // ignore
+    }
+    const entry = listPiConfigFiles(agentDir).find((f) => f.id === id);
+    if (!entry) throw new Error(`Unknown config id: ${id}`);
+    if (!entry.exists) throw new Error(`Config path does not exist: ${entry.path}`);
+    await shell.showItemInFolder(entry.path);
+  });
+  rpc.handle("pix:pi-sdk:open-config", async (_event, id: unknown) => {
+    if (typeof id !== "string" || !id.trim()) throw new Error("Invalid config id");
+    let agentDir = defaultAgentDir();
+    try {
+      const snap = await supervisor?.snapshot();
+      if (snap?.agentDir) agentDir = snap.agentDir;
+    } catch {
+      // ignore
+    }
+    const entry = listPiConfigFiles(agentDir).find((f) => f.id === id);
+    if (!entry) throw new Error(`Unknown config id: ${id}`);
+    if (!entry.openable) throw new Error("This file cannot be opened from Pix (sensitive).");
+    if (!entry.exists) throw new Error(`Config path does not exist: ${entry.path}`);
+    const error = await shell.openPath(entry.path);
+    if (error) throw new Error(error);
+  });
+  rpc.handle("pix:pi-sdk:install-global", () => runInstallGlobalPiCli());
+  rpc.handle("pix:pi-sdk:check-latest", () => collectPiSdkStatus({ forceLatest: true }));
+
+  // Only resolve global package when user already prefers global SDK.
+  // Default builtin: skip global pi probe entirely at startup.
+  if (getPiSdkPrefs().source === "global") {
+    void resolveGlobalSdkCached(true).catch(() => undefined);
+  }
+
+  await createWindow();
+
+  rpc.handle(
+    "pix:host:start",
+    (_event, options?: { cwd?: string; sessionFile?: string; resumeRecent?: boolean }) =>
+      supervisor?.start(options),
+  );
+  rpc.handle("pix:host:snapshot", () => supervisor?.snapshot());
+  rpc.handle("pix:host:stop", () => {
+    piTuiController?.disposeAll();
+    piTuiGuard.release();
+    return supervisor?.stop();
+  });
+  rpc.handle("pix:workspace:get-cwd", () => supervisor?.getWorkspaceCwd());
+  rpc.handle("pix:workspace:list-recent", () => supervisor?.listRecentWorkspaces());
+  rpc.handle(
+    "pix:workspace:open-path",
+    (_event, cwd: string, options?: { resumeRecent?: boolean }) =>
+      supervisor?.openWorkspace(cwd, options),
+  );
+  rpc.handle("pix:workspace:remove-recent", (_event, cwd: string) =>
+    supervisor?.removeRecentWorkspace(cwd),
+  );
+  rpc.handle("pix:workspace:clear-active", () => supervisor?.clearActiveWorkspace());
+  rpc.handle("pix:workspace:get-git-context", (_event, cwd?: string) => {
+    const path =
+      typeof cwd === "string" && cwd.trim() ? cwd : (supervisor?.getWorkspaceCwd() ?? undefined);
+    return readGitContext(path);
+  });
+  rpc.handle("pix:workspace:list-git-branches", async (_event, cwd?: string) => {
+    const path = resolveWorkspaceCwd(cwd, supervisor?.getWorkspaceCwd());
+    return listGitBranches(path);
+  });
+  rpc.handle("pix:workspace:checkout-git-branch", async (_event, branch: string, cwd?: string) => {
+    const path = resolveWorkspaceCwd(cwd, supervisor?.getWorkspaceCwd());
+    return checkoutGitBranch(path, branch);
+  });
+  rpc.handle(
+    "pix:workspace:create-git-branch",
+    async (_event, branch: string, options?: { checkout?: boolean; cwd?: string }) => {
+      const path = resolveWorkspaceCwd(options?.cwd, supervisor?.getWorkspaceCwd());
+      return createGitBranch(path, branch, options?.checkout !== false);
+    },
+  );
+  rpc.handle("pix:workspace:list-git-worktrees", async (_event, cwd?: string) => {
+    const path = resolveWorkspaceCwd(cwd, supervisor?.getWorkspaceCwd());
+    return listGitWorktrees(path);
+  });
+  rpc.handle("pix:workspace:list-managed-worktrees", async () => listAllManagedWorktrees());
+  rpc.handle(
+    "pix:workspace:create-git-worktree",
+    async (
+      _event,
+      options: {
+        path?: string;
+        branch?: string;
+        newBranch?: string;
+        name?: string;
+        cwd?: string;
+      },
+    ) => {
+      const path = resolveWorkspaceCwd(options?.cwd, supervisor?.getWorkspaceCwd());
+      return createGitWorktree(path, options);
+    },
+  );
+  rpc.handle(
+    "pix:workspace:remove-git-worktree",
+    async (_event, worktreePath: string, cwd?: string) => {
+      return removeGitWorktree(worktreePath, cwd);
+    },
+  );
+  rpc.handle("pix:workspace:get-worktree-prefs", (_event, cwd?: string) => {
+    const path =
+      typeof cwd === "string" && cwd.trim() ? cwd : (supervisor?.getWorkspaceCwd() ?? undefined);
+    return getWorktreePrefsView(path);
+  });
+  rpc.handle(
+    "pix:workspace:set-worktree-prefs",
+    (_event, patch: { rootConfigured?: string; autoDelete?: boolean; autoDeleteLimit?: number }) =>
+      setWorktreePrefs(patch ?? {}),
+  );
+  rpc.handle("pix:workspace:get-git-prefs", () => getGitPrefs());
+  rpc.handle(
+    "pix:workspace:set-git-prefs",
+    (
+      _event,
+      patch: {
+        branchPrefix?: string;
+        pullMode?: "merge" | "squash";
+        forcePush?: boolean;
+        draftPr?: boolean;
+        customCommitCommand?: string;
+        customPrCommand?: string;
+        modelProvider?: string;
+        modelId?: string;
+      },
+    ) => setGitPrefs(patch ?? {}),
+  );
+  rpc.handle("pix:workspace:reveal-in-folder", (_event, cwd: string) => {
+    if (typeof cwd === "string" && cwd.trim()) return shell.showItemInFolder(cwd);
+  });
+  rpc.handle("pix:workspace:open-file", async (_event, path: string) => {
+    if (typeof path !== "string" || !path.trim()) throw new Error("Invalid file path");
+    const error = await shell.openPath(path);
+    if (error) throw new Error(error);
+  });
+  rpc.handle("pix:workspace:open-external", async (_event, url: string) => {
+    if (typeof url !== "string") throw new Error("Invalid external URL");
+    const protocol = new URL(url).protocol;
+    if (!new Set(["http:", "https:", "mailto:"]).has(protocol)) {
+      throw new Error(`Unsupported external URL protocol: ${protocol}`);
+    }
+    await shell.openExternal(url);
+  });
+  rpc.handle("pix:workspace:ensure-default", () => ensureDefaultWorkspacePath());
+  rpc.handle("pix:workspace:ensure-conversation", () => ensureConversationWorkspacePath());
+  rpc.handle("pix:workspace:git-status", async (_event, cwd?: string) => {
+    const path = resolveWorkspaceCwd(cwd, supervisor?.getWorkspaceCwd());
+    return gitStatus(path);
+  });
+  rpc.handle("pix:workspace:git-commit", async (_event, message: string, cwd?: string) => {
+    const path = resolveWorkspaceCwd(cwd, supervisor?.getWorkspaceCwd());
+    return gitCommit(path, message);
+  });
+  rpc.handle("pix:workspace:git-pull", async (_event, cwd?: string) => {
+    const path = resolveWorkspaceCwd(cwd, supervisor?.getWorkspaceCwd());
+    return gitPull(path);
+  });
+  rpc.handle("pix:workspace:git-push", async (_event, cwd?: string) => {
+    const path = resolveWorkspaceCwd(cwd, supervisor?.getWorkspaceCwd());
+    return gitPush(path);
+  });
+  rpc.handle("pix:workspace:git-commit-and-push", async (_event, message: string, cwd?: string) => {
+    const path = resolveWorkspaceCwd(cwd, supervisor?.getWorkspaceCwd());
+    return gitCommitAndPush(path, message);
+  });
+  rpc.handle("pix:workspace:git-generate-commit-message", async (_event, cwd?: string) => {
+    const path = resolveWorkspaceCwd(cwd, supervisor?.getWorkspaceCwd());
+    return generateCommitMessage(path);
+  });
+  rpc.handle("pix:workspace:open-create-pr", async (_event, cwd?: string) => {
+    const path = resolveWorkspaceCwd(cwd, supervisor?.getWorkspaceCwd());
+    return openCreatePullRequest(path);
+  });
+  rpc.handle("pix:workspace:list-open-targets", async (_event, cwd?: string) => {
+    const path = resolveWorkspaceCwd(cwd, supervisor?.getWorkspaceCwd());
+    return listOpenTargets(path);
+  });
+  rpc.handle("pix:workspace:open-in-app", async (_event, appId: string, cwd?: string) => {
+    const path = resolveWorkspaceCwd(cwd, supervisor?.getWorkspaceCwd());
+    return openInApp(appId, path);
+  });
+  rpc.handle("pix:workspace:pick-folder", async () => {
+    if (!mainWindow) return undefined;
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ["openDirectory", "createDirectory"],
+    });
+    if (result.canceled || !result.filePaths[0]) return undefined;
+    return result.filePaths[0];
+  });
+  // Windows/Linux: Electron cannot open a dialog that is both a file picker and a
+  // directory picker. Combining openFile+openDirectory forces directory-only UI, so
+  // users could not select files. Callers pass mode explicitly.
+  rpc.handle(
+    "pix:workspace:pick-attachments",
+    async (_event, options?: { mode?: "files" | "folders" }) => {
+      if (!mainWindow) return [];
+      const mode = options?.mode === "folders" ? "folders" : "files";
+      const properties: Array<"openFile" | "openDirectory" | "multiSelections"> =
+        mode === "folders" ? ["openDirectory", "multiSelections"] : ["openFile", "multiSelections"];
+      const result = await dialog.showOpenDialog(mainWindow, {
+        properties,
+        // Keep the dialog on top of our frameless/custom window on Windows.
+        ...(process.platform === "win32"
+          ? { title: mode === "folders" ? "选择文件夹" : "选择文件" }
+          : {}),
+      });
+      return result.canceled ? [] : result.filePaths;
+    },
+  );
+  rpc.handle(
+    "pix:workspace:search-paths",
+    async (_event, query?: string, options?: { cwd?: string; limit?: number }) => {
+      const fromOpts =
+        typeof options?.cwd === "string" && options.cwd.trim() ? options.cwd.trim() : undefined;
+      const resolved = fromOpts ?? supervisor?.getWorkspaceCwd();
+      if (!resolved || !existsSync(resolved)) return [];
+      return searchWorkspacePaths(
+        resolved,
+        typeof query === "string" ? query : "",
+        options?.limit ?? 24,
+      );
+    },
+  );
+  rpc.handle(
+    "pix:workspace:save-clipboard-image",
+    async (_event, options?: { bytes?: number[]; ext?: string }) => {
+      const dir = join(app.getPath("temp"), "pix-attachments");
+      mkdirSync(dir, { recursive: true });
+      let buffer: Buffer | undefined;
+      let ext = typeof options?.ext === "string" && options.ext.trim() ? options.ext.trim() : "png";
+      if (Array.isArray(options?.bytes) && options.bytes.length > 0) {
+        buffer = Buffer.from(options.bytes);
+      } else {
+        const bytes = await nativeRequest<number[]>("clipboard.read-image");
+        if (!bytes?.length) return undefined;
+        buffer = Buffer.from(bytes);
+        ext = "png";
+      }
+      if (!buffer || buffer.length === 0) return undefined;
+      const filePath = join(dir, `paste-${Date.now()}.${ext.replace(/^\./, "")}`);
+      writeFileSync(filePath, buffer);
+      return filePath;
+    },
+  );
+  /** Local image → data-URL. Default maxEdge 160 (chips); pass a larger edge for timeline display. */
+  rpc.handle(
+    "pix:workspace:read-attachment-preview",
+    async (_event, filePath?: string, options?: { maxEdge?: number }) => {
+      if (typeof filePath !== "string" || !filePath.trim()) return undefined;
+      const abs = isAbsolute(filePath) ? resolve(filePath) : resolve(filePath);
+      if (!existsSync(abs)) return undefined;
+      try {
+        if (!lstatSync(abs).isFile()) return undefined;
+      } catch {
+        return undefined;
+      }
+      const ext = abs.slice(abs.lastIndexOf(".")).toLowerCase();
+      if (
+        ![
+          ".png",
+          ".jpg",
+          ".jpeg",
+          ".gif",
+          ".webp",
+          ".svg",
+          ".bmp",
+          ".tif",
+          ".tiff",
+          ".heic",
+          ".avif",
+        ].includes(ext)
+      ) {
+        return undefined;
+      }
+      const requested = typeof options?.maxEdge === "number" ? options.maxEdge : 160;
+      const maxEdge = Math.min(2048, Math.max(32, Math.round(requested)));
+      const maxBytes = maxEdge > 320 ? 12_000_000 : 1_500_000;
+      const originalMime =
+        ext === ".gif"
+          ? "image/gif"
+          : ext === ".webp"
+            ? "image/webp"
+            : ext === ".svg"
+              ? "image/svg+xml"
+              : undefined;
+      try {
+        // Keep GIF/WebP/SVG bytes so animation and vectors survive (nativeImage → PNG does not).
+        if (originalMime && (ext === ".gif" || ext === ".svg" || maxEdge > 320)) {
+          const raw = readFileSync(abs);
+          if (raw.length && raw.length <= maxBytes) {
+            return `data:${originalMime};base64,${raw.toString("base64")}`;
+          }
+          if (ext === ".gif" || ext === ".svg") return undefined;
+        }
+        const image = nativeImage.createFromPath(abs);
+        if (image.isEmpty()) return undefined;
+        const { width, height } = image.getSize();
+        let out = image;
+        if (width > maxEdge || height > maxEdge) {
+          const scale = Math.min(maxEdge / Math.max(width, 1), maxEdge / Math.max(height, 1));
+          out = image.resize({
+            width: Math.max(1, Math.round(width * scale)),
+            height: Math.max(1, Math.round(height * scale)),
+            quality: "good",
+          });
+        }
+        const png = out.toPNG();
+        if (!png.length || png.length > maxBytes) return undefined;
+        return `data:image/png;base64,${png.toString("base64")}`;
+      } catch {
+        return undefined;
+      }
+    },
+  );
+  rpc.handle("pix:trust:get", () => supervisor?.getTrust());
+  rpc.handle("pix:trust:set", (_event, trusted: boolean) => supervisor?.setTrust(trusted));
+  rpc.handle("pix:models:list", () => supervisor?.listModels());
+  rpc.handle("pix:models:set", (_event, provider: string, id: string) =>
+    supervisor?.setModel(provider, id),
+  );
+  rpc.handle("pix:models:get-config", () => supervisor?.getModelsJsonConfig());
+  rpc.handle("pix:models:upsert-custom", (_event, input: UpsertCustomProviderInput) =>
+    supervisor?.upsertCustomProvider(input),
+  );
+  rpc.handle("pix:models:remove-custom", (_event, provider: string) =>
+    supervisor?.removeCustomProvider(provider),
+  );
+  rpc.handle("pix:models:remove-custom-model", (_event, provider: string, modelId: string) =>
+    supervisor?.removeCustomModel(provider, modelId),
+  );
+  rpc.handle("pix:models:open-config", () => supervisor?.openModelsJson());
+  rpc.handle("pix:models:reveal-config", () => supervisor?.revealModelsJson());
+  rpc.handle("pix:thinking:set", (_event, level: string) => supervisor?.setThinkingLevel(level));
+  rpc.handle("pix:service-tier:set", (_event, tier: string) => supervisor?.setServiceTier(tier));
+  rpc.handle("pix:providers:list", () => supervisor?.listProviders());
+  rpc.handle("pix:providers:usage", () => supervisor?.listProviderUsage());
+  rpc.handle("pix:providers:set-api-key", (_event, provider: string, apiKey: string) =>
+    supervisor?.setProviderApiKey(provider, apiKey),
+  );
+  rpc.handle("pix:providers:clear-auth", (_event, provider: string) =>
+    supervisor?.clearProviderAuth(provider),
+  );
+  rpc.handle("pix:providers:oauth-start", (_event, provider: string, operationId?: string) =>
+    supervisor?.startProviderOAuth(provider, operationId),
+  );
+  rpc.handle(
+    "pix:providers:oauth-respond",
+    (_event, operationId: string, promptId: string, value?: string, cancelled?: boolean) =>
+      supervisor?.respondProviderOAuth(operationId, promptId, value, cancelled),
+  );
+  rpc.handle("pix:providers:oauth-cancel", (_event, operationId: string) =>
+    supervisor?.cancelProviderOAuth(operationId),
+  );
+  rpc.handle("pix:settings:get", () => supervisor?.getPiSettings());
+  rpc.handle("pix:settings:patch", (_event, patch: PiSettingsPatch) =>
+    supervisor?.patchPiSettings(patch),
+  );
+  rpc.handle(
+    "pix:agent:prompt",
+    async (
+      _event,
+      message: string,
+      streamingBehavior?: "steer" | "followUp",
+      imagePaths?: string[],
+    ) => {
+      // A warm TUI for this session must stop before the Host writes the same JSONL.
+      // Other parked sessions remain isolated and can be promoted later.
+      const sessionFile = supervisor?.activeSessionFile();
+      if (sessionFile && piTuiController?.disposeSession(sessionFile)) {
+        piTuiGuard.release(sessionFile);
+      } else if (!sessionFile && piTuiController?.isAlive()) {
+        piTuiController.dispose();
+        piTuiGuard.release();
+      }
+      piTuiGuard.assertHostPromptAllowed();
+      return supervisor?.prompt(message, streamingBehavior, imagePaths);
+    },
+  );
+
+  // ── Embedded pi TUI (real PTY; contentMode terminal) ─────────────────────
+  rpc.handle(
+    "pix:terminal:open",
+    async (_event, options: { sessionFile: string; cwd: string; cols?: number; rows?: number }) => {
+      if (!options || typeof options.sessionFile !== "string" || typeof options.cwd !== "string") {
+        throw new Error("terminal.open requires sessionFile and cwd");
+      }
+      const plan = planPiTuiLaunch({
+        sessionFile: options.sessionFile,
+        cwd: options.cwd,
+        ...(typeof options.cols === "number" ? { cols: options.cols } : {}),
+        ...(typeof options.rows === "number" ? { rows: options.rows } : {}),
+      });
+      const controller = await getPiTuiController();
+      // Always transfer exclusive ownership on open. tryAcquire-only failed after
+      // the first session when guard/controller keys desynced (macOS /private/var
+      // vs /var, or suspend/cancel races) — UI then could not open any later TUI.
+      const acquired = piTuiGuard.transferTo(plan.sessionKey);
+      if (!acquired.ok) throw new Error(acquired.reason);
+
+      try {
+        const send = (channel: string, payload: unknown) => {
+          if (!mainWindow || mainWindow.isClosed()) return;
+          mainWindow.send(channel, payload);
+        };
+        const opened = await controller.open(plan, {
+          // Tag every stream event. Electron can deliver a queued event from the
+          // disposed PTY after the next session has already mounted.
+          onData: (data) => send("pix:terminal:data", { data, sessionFile: plan.sessionFile }),
+          onExit: (event) => {
+            piTuiGuard.release(plan.sessionKey);
+            send("pix:terminal:exit", { ...event, sessionFile: plan.sessionFile });
+          },
+        });
+        return {
+          sessionFile: opened.sessionFile,
+          cwd: opened.cwd,
+          resumed: opened.resumed,
+        };
+      } catch (error) {
+        piTuiGuard.release(plan.sessionKey);
+        throw error;
+      }
+    },
+  );
+  rpc.handle("pix:terminal:write", async (_event, data: string) => {
+    const controller = await getPiTuiController();
+    controller.write(typeof data === "string" ? data : String(data ?? ""));
+  });
+  rpc.handle("pix:terminal:resize", async (_event, cols: number, rows: number) => {
+    const controller = await getPiTuiController();
+    controller.resize(Number(cols) || 80, Number(rows) || 24);
+  });
+  rpc.handle("pix:terminal:suspend", async () => {
+    if (!piTuiController?.isAlive()) {
+      piTuiGuard.release();
+      return {};
+    }
+    const { sessionFile } = piTuiController.suspend();
+    // Release exclusive lock so chat can prompt (prompt path disposes suspended TUI).
+    piTuiGuard.release();
+    return sessionFile ? { sessionFile } : {};
+  });
+  rpc.handle("pix:terminal:dispose", async () => {
+    if (!piTuiController) {
+      piTuiGuard.release();
+      return {};
+    }
+    const { sessionFile } = piTuiController.dispose();
+    piTuiGuard.release();
+    return sessionFile ? { sessionFile } : {};
+  });
+  rpc.handle("pix:terminal:status", async () => {
+    if (!piTuiController) {
+      return { open: false, parkedSessionFiles: [], sessionCount: 0 };
+    }
+    const status = piTuiController.status();
+    const sessionFile = status.live?.sessionFile;
+    return {
+      open: piTuiController.isOpen(),
+      suspended: piTuiController.isSuspended(),
+      ...(sessionFile ? { sessionFile } : {}),
+      parkedSessionFiles: status.parkedSessionFiles,
+      sessionCount: status.parkedSessionFiles.length + (status.live ? 1 : 0),
+    };
+  });
+  rpc.handle("pix:agent:queue-clear", () => supervisor?.clearQueue());
+  rpc.handle("pix:agent:abort", () => supervisor?.abort());
+  rpc.handle("pix:session:list", () => supervisor?.listSessions());
+  rpc.handle("pix:session:list-for-cwd", async (_event, cwd: string) => {
+    if (typeof cwd !== "string" || !cwd.trim()) return [];
+    const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+    const requested = norm(cwd);
+    // When this cwd is the live host workspace, prefer host listSessions — it merges
+    // the in-memory session that pi has not flushed to disk yet (no assistant msg).
+    // Disk-only list would drop brand-new conversations from the sidebar.
+    //
+    // Re-check cwd after await: rapid project「新建会话」can switch the host mid-list
+    // and would otherwise return the *new* project's sessions under the requested cwd
+    // (wiping the 对话 rail when those rows are filtered by project cwd).
+    try {
+      const current = supervisor?.getWorkspaceCwd();
+      if (current && norm(current) === requested) {
+        const listed = await supervisor?.listSessions();
+        const still = supervisor?.getWorkspaceCwd();
+        if (listed && still && norm(still) === requested) {
+          return listed.threads.filter((thread) => {
+            const threadCwd = (thread.cwd || "").trim();
+            if (!threadCwd) return true;
+            return norm(threadCwd) === requested;
+          });
+        }
+      }
+    } catch {
+      // host may be stopped — fall through to disk scan
+    }
+    // Import agent-runtime (pi stays external in the main bundle — see vite.main.config).
+    const { listProjectSessions } = await import("@pix/agent-runtime");
+    return listProjectSessions(cwd);
+  });
+  rpc.handle("pix:session:new", () => supervisor?.newSession());
+  rpc.handle("pix:session:create-blank", () => supervisor?.createBlankConversation());
+  rpc.handle("pix:session:switch", (_event, sessionPath: string) =>
+    supervisor?.switchSession(sessionPath),
+  );
+  rpc.handle("pix:session:fork", (_event, entryId?: string) => supervisor?.forkSession(entryId));
+  rpc.handle("pix:session:tree", () => supervisor?.sessionTree());
+  rpc.handle(
+    "pix:session:navigate-tree",
+    (_event, targetId: string, options?: { summarize?: boolean; customInstructions?: string }) =>
+      supervisor?.navigateSessionTree(targetId, options),
+  );
+  rpc.handle("pix:session:compact", (_event, instructions?: string) =>
+    supervisor?.compactSession(instructions),
+  );
+  rpc.handle("pix:session:set-name", (_event, name: string) => supervisor?.setSessionName(name));
+  rpc.handle("pix:session:clone", () => supervisor?.cloneSession());
+  rpc.handle("pix:session:info", () => supervisor?.sessionInfo());
+  rpc.handle("pix:session:export", (_event, format: "html" | "jsonl", outputPath?: string) =>
+    supervisor?.exportSession(format, outputPath),
+  );
+  rpc.handle("pix:session:export-pick", (_event, format: "html" | "jsonl") =>
+    supervisor?.exportSessionPick(format),
+  );
+  rpc.handle("pix:session:import", (_event, inputPath: string) =>
+    supervisor?.importSession(inputPath),
+  );
+  rpc.handle("pix:session:import-pick", () => supervisor?.importSessionPick());
+  rpc.handle(
+    "pix:session:bash",
+    (_event, command: string, options?: { excludeFromContext?: boolean }) =>
+      supervisor?.sessionBash(command, options),
+  );
+  rpc.handle("pix:session:copy-last", () => supervisor?.copyLastAssistant());
+  rpc.handle("pix:session:share", () => supervisor?.shareSession());
+  rpc.handle("pix:runtime:reload", () => supervisor?.reloadRuntime());
+  rpc.handle("pix:models:list-scoped", () => supervisor?.listScopedModels());
+  rpc.handle("pix:models:refresh-catalog", () => supervisor?.refreshModelCatalog());
+  rpc.handle("pix:packages:list", () => supervisor?.listPackages());
+  rpc.handle(
+    "pix:packages:install",
+    (_event, source: string, scope: "global" | "project", options?: { temporary?: boolean }) =>
+      supervisor?.installPackage(source, scope, options),
+  );
+  rpc.handle(
+    "pix:packages:set-enabled",
+    (_event, source: string, scope: "global" | "project", enabled: boolean) =>
+      supervisor?.setPackageEnabled(source, scope, enabled),
+  );
+  rpc.handle("pix:packages:remove", (_event, source: string, scope: "global" | "project") =>
+    supervisor?.removePackage(source, scope),
+  );
+  rpc.handle("pix:packages:update", (_event, source?: string) => supervisor?.updatePackage(source));
+  rpc.handle("pix:packages:check-updates", () => supervisor?.checkPackageUpdates());
+  rpc.handle(
+    "pix:packages:search-catalog",
+    (_event, query?: string, size?: number, from?: number) =>
+      searchPiPackageCatalog(query, size, from),
+  );
+  rpc.handle("pix:resources:list", () => supervisor?.listResources());
+  rpc.handle("pix:extension-ui:respond", (_event, response: ExtensionUiResponse) =>
+    supervisor?.extensionUiRespond(response),
+  );
+  if (process.env.PIX_ENABLE_TEST_COMMANDS === "1") {
+    rpc.handle("pix:test:crash-host", () => supervisor?.crashHost());
+  }
+
+  rpc.handle("pix:notifications:show", (_event, payload: ShowOsNotificationPayload) =>
+    showOsNotification(payload ?? { title: "" }),
+  );
+  rpc.handle("pix:notifications:open-system-settings", () => {
+    openSystemNotificationSettings();
+  });
+
+  markReady(async () => {
+    piTuiController?.disposeAll();
+    piTuiGuard.release();
+    await supervisor?.stop();
+  });
+  if (process.env.PIX_NO_AUTO_RESUME !== "1" && supervisor) {
+    // Product cold start: restore last durable workspace and continue recent pi session.
+    // Skip ephemeral fixture paths and missing directories.
+    const cwd = durableWorkspacePath(supervisor.getWorkspaceCwd());
+    if (cwd) {
+      try {
+        const snapshot = await supervisor.start({
+          cwd,
+          resumeRecent: true,
+          force: true,
+        });
+        console.log(
+          JSON.stringify({
+            type: "pix.m2.auto_resume",
+            cwd: snapshot.cwd,
+            sessionId: snapshot.sessionId,
+            sessionFile: snapshot.sessionFile,
+          }),
+        );
+      } catch (error) {
+        console.warn("Pix auto-resume skipped", error);
+      }
+    }
+  }
+})().catch((error: unknown) => {
+  console.error("Pix failed to initialize", error);
+  process.exit(1);
+});

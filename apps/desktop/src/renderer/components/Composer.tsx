@@ -41,7 +41,6 @@ import {
   Folder,
   FolderGit2,
   FolderOpen,
-  Gauge,
   GitBranch,
   GitFork,
   Info,
@@ -62,7 +61,6 @@ import {
   ShieldAlert,
   ShieldCheck,
   Slash,
-  Sparkles,
   Square,
   Tag,
   Upload,
@@ -79,10 +77,9 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { ComposerAttachmentList } from "./ComposerAttachmentList.tsx";
 import { ComposerQueueCard } from "./ComposerQueueCard.tsx";
 import { CreateWorktreeDialog } from "./CreateWorktreeDialog.tsx";
-import { t, thinkingLevelLabel, type Locale } from "../lib/i18n.ts";
-import { modelSupportsServiceTier, type ServiceTierId } from "../lib/service-tier.ts";
-import { modelSupportsThinking } from "../lib/thinking-levels.ts";
-import { groupModelsByProvider } from "../lib/model-groups.ts";
+import { t, type Locale } from "../lib/i18n.ts";
+import type { ServiceTierId } from "../lib/service-tier.ts";
+import { ComposerModelPicker } from "./ComposerModelPicker.tsx";
 import {
   addResourceQuery,
   applyPathTokenCompletion,
@@ -200,73 +197,6 @@ function isValidBranchName(name: string): boolean {
   return true;
 }
 
-function MenuRow(props: {
-  icon?: ReactNode;
-  label: string;
-  description?: string;
-  active?: boolean;
-  muted?: boolean;
-  /** Emphasize label (e.g. warning / danger) */
-  emphasize?: "danger" | "none";
-  onClick: () => void;
-  testId?: string;
-}) {
-  const danger = props.emphasize === "danger";
-  return (
-    <button
-      type="button"
-      role="menuitem"
-      data-testid={props.testId}
-      className={cn(
-        "flex w-full items-start gap-2 px-2.5 py-2 text-left transition-colors",
-        props.muted
-          ? "text-[var(--muted-foreground)] hover:bg-[var(--hover-fill)]"
-          : "text-[var(--popover-foreground,var(--foreground))] hover:bg-[var(--hover-fill)]",
-        danger && "hover:bg-red-500/10",
-        props.active && !danger && "bg-[var(--accent)]",
-        props.active && danger && "bg-red-500/10",
-      )}
-      onClick={props.onClick}
-    >
-      {props.icon ? (
-        <span
-          className={cn(
-            "mt-0.5 inline-flex size-4 shrink-0",
-            danger ? "text-red-500 opacity-100" : "opacity-70",
-          )}
-        >
-          {props.icon}
-        </span>
-      ) : null}
-      <span className="min-w-0 flex-1">
-        <span
-          className={cn(
-            "block truncate text-[13px] font-medium leading-snug",
-            danger && "text-red-500",
-          )}
-        >
-          {props.label}
-        </span>
-        {props.description ? (
-          <span
-            className={cn(
-              "mt-0.5 block text-[11px] leading-snug",
-              danger ? "text-red-500/75" : "text-[var(--text-subtle)]",
-            )}
-          >
-            {props.description}
-          </span>
-        ) : null}
-      </span>
-      {props.active ? (
-        <span className={cn("mt-0.5 text-[11px]", danger ? "text-red-500" : "text-[#0a84ff]")}>
-          ✓
-        </span>
-      ) : null}
-    </button>
-  );
-}
-
 /** Full-access caution: orange-red (not pale system orange, not pure error red). */
 const ACCESS_FULL_ORANGE = "text-[#ff5c1a]";
 const ACCESS_FULL_ORANGE_MUTED = "text-[#ff5c1a]/90";
@@ -336,93 +266,6 @@ function AccessOption(props: {
         </span>
       ) : null}
     </button>
-  );
-}
-
-/**
- * Hover-only row → right flyout.
- * Open/close timers are owned by the parent so sibling rows can switch without flicker.
- */
-function FlyoutRow(props: {
-  icon?: ReactNode;
-  label: string;
-  /** Current selection shown immediately left of the › arrow. */
-  valueLabel?: string;
-  open: boolean;
-  /** Open this flyout immediately (cancels any pending close). */
-  onHoverOpen: () => void;
-  /** Schedule close after a short delay (cancelled if another flyout opens). */
-  onHoverLeave: () => void;
-  children: ReactNode;
-  testId?: string;
-  flyoutTestId?: string;
-  minWidth?: number;
-  /** When true, row is visible but does not open a flyout. */
-  disabled?: boolean;
-}) {
-  const rowRef = useRef<HTMLDivElement | null>(null);
-  const [anchor, setAnchor] = useState<AnchorRect | null>(null);
-  const disabled = props.disabled === true;
-
-  useEffect(() => {
-    if (!props.open || disabled) return;
-    setAnchor(anchorFromElement(rowRef.current));
-  }, [props.open, disabled]);
-
-  function show() {
-    if (disabled) return;
-    setAnchor(anchorFromElement(rowRef.current));
-    props.onHoverOpen();
-  }
-
-  return (
-    <>
-      <div
-        ref={rowRef}
-        role="menuitem"
-        aria-disabled={disabled || undefined}
-        data-testid={props.testId}
-        data-disabled={disabled ? "true" : undefined}
-        className={cn(
-          "flex w-full cursor-default items-center gap-2 px-2.5 py-2 text-left text-[13px] transition-colors",
-          "text-[var(--popover-foreground,var(--foreground))]",
-          disabled ? "opacity-50" : "hover:bg-[var(--hover-fill)]",
-          !disabled && props.open && "bg-[var(--accent)]",
-        )}
-        onMouseEnter={show}
-        onMouseLeave={disabled ? undefined : props.onHoverLeave}
-      >
-        {props.icon ? (
-          <span className="inline-flex size-4 shrink-0 opacity-70">{props.icon}</span>
-        ) : null}
-        <span className="min-w-0 flex-1 truncate font-medium leading-snug">{props.label}</span>
-        {props.valueLabel ? (
-          <span className="max-w-[6.5rem] shrink-0 truncate text-[12px] text-[var(--text-subtle)]">
-            {props.valueLabel}
-          </span>
-        ) : null}
-        {!disabled ? (
-          <ChevronRight className="size-3.5 shrink-0 opacity-50" strokeWidth={2} />
-        ) : null}
-      </div>
-      {!disabled ? (
-        <FloatingMenu
-          open={props.open && Boolean(anchor)}
-          anchor={anchor}
-          onClose={props.onHoverLeave}
-          placement="right"
-          zIndex={10_050}
-          closeOnOutside={false}
-          minWidth={props.minWidth ?? 180}
-          className="py-1"
-          {...(props.flyoutTestId ? { testId: props.flyoutTestId } : {})}
-        >
-          <div onMouseEnter={props.onHoverOpen} onMouseLeave={props.onHoverLeave}>
-            {props.children}
-          </div>
-        </FloatingMenu>
-      ) : null}
-    </>
   );
 }
 
@@ -663,8 +506,6 @@ export function Composer(props: ComposerProps) {
   const [caret, setCaret] = useState(0);
   const [refTokens, setRefTokens] = useState<ComposerRefToken[]>([]);
   /** Which model-submenu flyout is open: thinking | speed */
-  const [modelFlyout, setModelFlyout] = useState<"thinking" | "speed" | null>(null);
-  const modelFlyoutCloseTimer = useRef<number | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   /** Main input card only — slash/@ menus overlay this, ignoring project-bar protrusion height. */
   const composerCardRef = useRef<HTMLFormElement | null>(null);
@@ -732,31 +573,6 @@ export function Composer(props: ComposerProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- tr is stable per locale
   }, [menu, props.workspacePath, props.locale]);
 
-  function clearModelFlyoutCloseTimer() {
-    if (modelFlyoutCloseTimer.current != null) {
-      window.clearTimeout(modelFlyoutCloseTimer.current);
-      modelFlyoutCloseTimer.current = null;
-    }
-  }
-
-  function openModelFlyout(kind: "thinking" | "speed") {
-    clearModelFlyoutCloseTimer();
-    setModelFlyout(kind);
-  }
-
-  function scheduleCloseModelFlyout() {
-    clearModelFlyoutCloseTimer();
-    // Shared delay so moving between sibling rows / into the flyout does not flicker.
-    modelFlyoutCloseTimer.current = window.setTimeout(() => {
-      modelFlyoutCloseTimer.current = null;
-      setModelFlyout(null);
-    }, 180);
-  }
-
-  useEffect(() => {
-    return () => clearModelFlyoutCloseTimer();
-  }, []);
-
   const projectPaths = useMemo(() => {
     const list: string[] = [];
     if (props.workspacePath) list.push(props.workspacePath);
@@ -784,26 +600,6 @@ export function Composer(props: ComposerProps) {
       );
     });
   }, [projectPaths, projectQuery]);
-
-  const modelLabel = useMemo(() => {
-    if (!props.modelValue) return tr("composer.model.none");
-    const [provider, id] = props.modelValue.split("/");
-    const found = props.modelOptions.find((m) => m.provider === provider && m.id === id);
-    return found?.name || id || tr("composer.model.none");
-  }, [props.modelValue, props.modelOptions, props.locale]);
-
-  const modelGroups = useMemo(
-    () => groupModelsByProvider(props.modelOptions, tr("models.group.custom")),
-    [props.modelOptions, props.locale],
-  );
-  const thinkingSupported = modelSupportsThinking(props.thinkingLevels);
-  const serviceTierSupported = modelSupportsServiceTier(props.serviceTiers);
-
-  function serviceTierLabel(tier: string): string {
-    if (tier === "priority") return tr("composer.speed.priority");
-    if (tier === "flex") return tr("composer.speed.flex");
-    return tr("composer.speed.default");
-  }
 
   const composerTrigger =
     detectComposerTrigger(props.prompt, caret) ?? detectChipTrigger(props.prompt, caret, refTokens);
@@ -937,12 +733,10 @@ export function Composer(props: ComposerProps) {
   }, [composerTrigger]);
 
   function closeMenu() {
-    clearModelFlyoutCloseTimer();
     setMenu(null);
     setAnchor(null);
     setProjectQuery("");
     setBranchQuery("");
-    setModelFlyout(null);
     setLocalTip(null);
   }
 
@@ -1354,6 +1148,16 @@ export function Composer(props: ComposerProps) {
     }
   }
 
+  useEffect(() => {
+    const onNativeDrop = (event: Event) => {
+      const paths = (event as CustomEvent<unknown>).detail;
+      if (Array.isArray(paths) && paths.every((path) => typeof path === "string"))
+        props.onAddAttachments?.(paths);
+    };
+    window.addEventListener("pix:native-drop", onNativeDrop);
+    return () => window.removeEventListener("pix:native-drop", onNativeDrop);
+  }, [props.onAddAttachments]);
+
   function handleComposerDrop(event: DragEvent<HTMLTextAreaElement>) {
     const files = event.dataTransfer?.files;
     if (!files?.length) return;
@@ -1614,13 +1418,13 @@ export function Composer(props: ComposerProps) {
             )}
           />
         </div>
-        <div className="flex items-center justify-between gap-2 px-2 pb-2 pt-1">
+        <div className="composer-toolbar">
           {/* Left: attach + access */}
-          <div className="flex min-w-0 items-center gap-0.5">
+          <div className="composer-toolbar-controls">
             <button
               type="button"
               data-testid="composer-attach"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full text-[var(--muted-foreground)] hover:bg-[var(--hover-fill)] hover:text-[var(--foreground)]"
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[var(--muted-foreground)] hover:bg-[var(--hover-fill)] hover:text-[var(--foreground)]"
               title={tr("composer.attach")}
               aria-label={tr("composer.attach")}
               onClick={(e) => openMenu("attach", e)}
@@ -1657,7 +1461,7 @@ export function Composer(props: ComposerProps) {
           </div>
 
           {/* Right: context + model + send */}
-          <div className="flex shrink-0 items-center gap-1">
+          <div className="composer-toolbar-controls">
             {props.showContextUsage !== false ? (
               <ContextUsageIndicator
                 label={tr("composer.context")}
@@ -1665,31 +1469,23 @@ export function Composer(props: ComposerProps) {
                 tokens={props.contextTokens}
               />
             ) : null}
-            <button
-              type="button"
-              data-testid="model-select-wrap"
-              title={
-                thinkingSupported
-                  ? `${modelLabel} ${thinkingLevelLabel(props.locale, props.thinkingLevel)}`
-                  : modelLabel
-              }
-              className={cn(
-                "inline-flex h-8 min-w-0 max-w-[14rem] items-center gap-2 rounded-full px-2",
-                "text-[12px] text-[var(--muted-foreground)] hover:bg-[var(--hover-fill)] hover:text-[var(--foreground)]",
-                !props.modelOptions.length && !props.modelValue && "opacity-50",
-              )}
-              disabled={props.running}
-              onClick={(e) => openMenu("model", e)}
-            >
-              <span className="min-w-0 truncate" data-testid="model-select-label">
-                {modelLabel}
-              </span>
-              {thinkingSupported ? (
-                <span className="shrink-0 opacity-70" data-testid="model-thinking-label">
-                  {thinkingLevelLabel(props.locale, props.thinkingLevel)}
-                </span>
-              ) : null}
-            </button>
+            <ComposerModelPicker
+              locale={props.locale}
+              running={props.running}
+              modelOptions={props.modelOptions}
+              modelValue={props.modelValue}
+              onModelChange={props.onModelChange}
+              thinkingLevel={props.thinkingLevel}
+              thinkingLevels={props.thinkingLevels}
+              onThinkingChange={props.onThinkingChange}
+              serviceTier={props.serviceTier}
+              serviceTiers={props.serviceTiers}
+              onServiceTierChange={props.onServiceTierChange}
+              open={menu === "model"}
+              anchor={anchor}
+              onToggle={(event) => openMenu("model", event)}
+              onClose={closeMenu}
+            />
             {/* hidden native selects for e2e/compat */}
             <select
               data-testid="model-select"
@@ -1699,8 +1495,10 @@ export function Composer(props: ComposerProps) {
               value={props.modelValue}
               disabled={!props.modelValue || props.running}
               onChange={(event) => {
-                const [provider, id] = event.target.value.split("/");
-                if (provider && id) props.onModelChange(provider, id);
+                const value = event.target.value;
+                const separator = value.indexOf("/");
+                if (separator > 0)
+                  props.onModelChange(value.slice(0, separator), value.slice(separator + 1));
               }}
             >
               {(props.modelOptions.length
@@ -1709,7 +1507,7 @@ export function Composer(props: ComposerProps) {
                   ? [
                       {
                         provider: props.modelValue.split("/")[0]!,
-                        id: props.modelValue.split("/")[1]!,
+                        id: props.modelValue.slice(props.modelValue.indexOf("/") + 1),
                         name: props.modelValue,
                       },
                     ]
@@ -2014,7 +1812,7 @@ export function Composer(props: ComposerProps) {
         placement="top"
         testId="composer-project-menu"
         minWidth={260}
-        className="!rounded-[var(--radius-panel)] !border-[var(--border)] !bg-[var(--surface-panel)] !py-0 overflow-hidden shadow-[var(--shadow-soft)]"
+        className="!py-0 overflow-hidden"
       >
         <div className="flex items-center gap-2 px-3 py-2.5 text-[var(--muted-foreground)]">
           <Search className="size-3.5 shrink-0 opacity-80" strokeWidth={1.75} />
@@ -2093,7 +1891,7 @@ export function Composer(props: ComposerProps) {
         placement="top"
         testId="composer-local-menu"
         minWidth={200}
-        className="!rounded-[var(--radius-panel)] !border-[var(--border)] !bg-[var(--surface-panel)] !py-0 overflow-hidden shadow-[var(--shadow-soft)]"
+        className="!py-0 overflow-hidden"
       >
         <div className="flex flex-col gap-0.5 p-1.5">
           <button
@@ -2171,7 +1969,7 @@ export function Composer(props: ComposerProps) {
         placement="top"
         testId="composer-branch-menu"
         minWidth={280}
-        className="!rounded-[var(--radius-panel)] !border-[var(--border)] !bg-[var(--surface-panel)] !py-0 overflow-hidden shadow-[var(--shadow-soft)]"
+        className="!py-0 overflow-hidden"
       >
         <div className="flex items-center gap-2 px-3 py-2.5 text-[var(--muted-foreground)]">
           <Search className="size-3.5 shrink-0 opacity-80" strokeWidth={1.75} />
@@ -2267,115 +2065,6 @@ export function Composer(props: ComposerProps) {
               }}
             />
           ))}
-        </div>
-      </FloatingMenu>
-
-      {/* Model menu: scrollable models + pinned thinking/speed flyouts */}
-      <FloatingMenu
-        open={menu === "model" && Boolean(anchor)}
-        anchor={anchor}
-        onClose={closeMenu}
-        placement="top"
-        testId="composer-model-menu"
-        minWidth={220}
-        className="flex w-[min(15rem,calc(100vw-2rem))] flex-col !overflow-hidden !py-0"
-      >
-        <div className="pix-scroll min-h-0 flex-1 overscroll-contain max-h-[min(320px,calc(100vh-14rem))]">
-          {modelGroups.length === 0 ? (
-            <p className="px-2.5 py-1.5 text-left text-[13px] text-[var(--text-subtle)]">
-              {tr("composer.model.none")}
-            </p>
-          ) : (
-            modelGroups.map((group) => (
-              <div
-                key={group.key}
-                className="composer-model-group"
-                data-testid={`composer-model-group-${group.key}`}
-              >
-                <div className="composer-model-group-label">{group.label}</div>
-                {group.models.map((model) => {
-                  const value = `${model.provider}/${model.id}`;
-                  return (
-                    <MenuRow
-                      key={value}
-                      label={model.name || model.id}
-                      active={props.modelValue === value}
-                      testId={`composer-model-${model.id}`}
-                      onClick={() => {
-                        props.onModelChange(model.provider, model.id);
-                        closeMenu();
-                      }}
-                    />
-                  );
-                })}
-              </div>
-            ))
-          )}
-        </div>
-        <div className="shrink-0 border-t border-[var(--border)] py-1">
-          {/* Thinking levels are model-specific (HostSnapshot.availableThinkingLevels). */}
-          <FlyoutRow
-            icon={<Sparkles className="size-3.5" strokeWidth={1.75} />}
-            label={tr("composer.model.thinking")}
-            valueLabel={
-              thinkingSupported
-                ? thinkingLevelLabel(props.locale, props.thinkingLevel)
-                : tr("composer.model.thinkingUnsupported")
-            }
-            open={modelFlyout === "thinking"}
-            onHoverOpen={() => openModelFlyout("thinking")}
-            onHoverLeave={scheduleCloseModelFlyout}
-            testId="composer-thinking-flyout-trigger"
-            flyoutTestId="composer-thinking-flyout"
-            minWidth={160}
-            disabled={!thinkingSupported}
-          >
-            {props.thinkingLevels.map((level) => (
-              <MenuRow
-                key={level}
-                label={thinkingLevelLabel(props.locale, level)}
-                active={props.thinkingLevel === level}
-                testId={`composer-thinking-${level}`}
-                onClick={() => {
-                  props.onThinkingChange(level);
-                  clearModelFlyoutCloseTimer();
-                  setModelFlyout(null);
-                }}
-              />
-            ))}
-          </FlyoutRow>
-
-          {/* OpenAI-family service_tier only — disabled when host reports no tiers. */}
-          <FlyoutRow
-            icon={<Gauge className="size-3.5" strokeWidth={1.75} />}
-            label={tr("composer.model.speed")}
-            valueLabel={
-              serviceTierSupported
-                ? serviceTierLabel(props.serviceTier)
-                : tr("composer.model.speedUnsupported")
-            }
-            open={modelFlyout === "speed"}
-            onHoverOpen={() => openModelFlyout("speed")}
-            onHoverLeave={scheduleCloseModelFlyout}
-            testId="composer-speed-flyout-trigger"
-            flyoutTestId="composer-speed-flyout"
-            minWidth={160}
-            disabled={!serviceTierSupported}
-          >
-            {props.serviceTiers.map((tier) => (
-              <MenuRow
-                key={tier}
-                label={serviceTierLabel(tier)}
-                active={props.serviceTier === tier}
-                testId={`composer-speed-${tier}`}
-                onClick={() => {
-                  props.onServiceTierChange(tier);
-                  clearModelFlyoutCloseTimer();
-                  setModelFlyout(null);
-                }}
-              />
-            ))}
-          </FlyoutRow>
         </div>
       </FloatingMenu>
 

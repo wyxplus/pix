@@ -86,6 +86,8 @@ export async function prepareLaunchEnv(options = {}) {
     USERPROFILE: home,
     XDG_CONFIG_HOME: join(home, ".config"),
     PI_CODING_AGENT_DIR: agentDir,
+    PIX_DATA_DIR: join(root, "desktop-data"),
+    PIX_DOCUMENTS_DIR: join(home, "Documents"),
     PIX_WORKSPACE: workspace,
     PIX_MODEL_PROVIDER: "pix-fake",
     PIX_MODEL_ID: "pix-fake",

@@ -1,156 +1,47 @@
-/**
- * Unit tests for release-assets.mjs (no vitest at root).
- * Run: node scripts/release-assets.test.mjs
- */
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync } from "node:fs";
+import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  isUsefulReleaseAsset,
-  collectReleaseAssets,
-  validatePublishAssets,
-} from "./release-assets.mjs";
+import { test } from "node:test";
+import { collect, manifest, TARGETS } from "./release-assets.mjs";
 
-/** @type {string[]} */
-const errors = [];
+await test("Tauri releases require installers and complete signed platform feeds", () => {
+  const root = mkdtempSync(join(tmpdir(), "pix-release-"));
+  try {
+    const out = join(root, "out");
+    for (const target of Object.keys(TARGETS)) {
+      const source = join(root, target);
+      mkdirSync(source);
+      assert.throws(() => collect(source, out, target), /Missing installer/);
+      const file = target.includes("darwin")
+        ? "Pix_0.7.7.app.tar.gz"
+        : target.includes("windows")
+          ? "Pix_0.7.7.exe"
+          : "Pix_0.7.7.AppImage";
+      if (target.includes("darwin")) writeFileSync(join(source, "Pix_0.7.7.dmg"), "installer");
+      writeFileSync(join(source, file), "payload");
+      writeFileSync(join(source, `${file}.sig`), "verified-by-tauri-at-install");
+      collect(source, out, target);
+    }
+    const feed = manifest(out, "num-scope/pix", "v0.7.7");
+    assert.equal(Object.keys(feed.platforms).length, 4);
+    assert.equal(feed.version, "0.7.7");
+    assert.ok(existsSync(join(out, "latest.json")));
+    assert.match(feed.platforms["darwin-aarch64"].url, /aarch64-apple-darwin/);
+    assert.ok(!existsSync(join(out, "manifest-aarch64-apple-darwin.json")));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
-function assert(cond, msg) {
-  if (!cond) errors.push(msg);
-}
-
-// --- isUsefulReleaseAsset ------------------------------------------------------
-
-assert(isUsefulReleaseAsset("Pix-0.5.0-win-x64.exe"), "keep exe");
-assert(isUsefulReleaseAsset("Pix-0.5.0-mac-arm64.dmg"), "keep dmg");
-assert(isUsefulReleaseAsset("Pix-0.5.0-mac-arm64.zip"), "keep zip");
-assert(isUsefulReleaseAsset("Pix-0.5.0-linux-x86_64.AppImage"), "keep AppImage");
-assert(isUsefulReleaseAsset("Pix-0.5.0-linux-amd64.deb"), "keep deb");
-assert(isUsefulReleaseAsset("latest.yml"), "keep latest.yml");
-assert(isUsefulReleaseAsset("latest-mac.yml"), "keep latest-mac.yml");
-assert(isUsefulReleaseAsset("latest-linux.yml"), "keep latest-linux.yml");
-assert(isUsefulReleaseAsset("latest-mac-arm64.yml"), "keep split mac feed");
-assert(isUsefulReleaseAsset("Pix-0.5.0-win-x64.exe.blockmap"), "keep blockmap");
-assert(!isUsefulReleaseAsset("builder-debug.yml"), "drop builder-debug");
-
-// --- collect: windows happy path -----------------------------------------------
-
-{
-  const root = mkdtempSync(join(tmpdir(), "pix-rel-win-"));
-  const out = join(root, "out");
-  const art = join(root, "art");
-  mkdirSync(out);
-  writeFileSync(join(out, "Pix-0.5.0-win-x64.exe"), "exe");
-  writeFileSync(join(out, "latest.yml"), "version: 0.5.0\n");
-  writeFileSync(join(out, "Pix-0.5.0-win-x64.exe.blockmap"), "map");
-  writeFileSync(join(out, "builder-debug.yml"), "debug");
-  const result = collectReleaseAssets({
-    outDir: out,
-    artifactsDir: art,
-    platform: "win",
-  });
-  assert(result.errors.length === 0, `win collect errors: ${result.errors.join("; ")}`);
-  assert(existsSync(join(art, "Pix-0.5.0-win-x64.exe")), "win exe copied");
-  assert(existsSync(join(art, "latest.yml")), "win feed copied");
-  assert(existsSync(join(art, "Pix-0.5.0-win-x64.exe.blockmap")), "blockmap copied");
-  assert(!existsSync(join(art, "builder-debug.yml")), "debug not copied");
-  rmSync(root, { recursive: true, force: true });
-}
-
-// --- collect: mac requires zip + renames feed ----------------------------------
-
-{
-  const root = mkdtempSync(join(tmpdir(), "pix-rel-mac-"));
-  const out = join(root, "out");
-  const art = join(root, "art");
-  mkdirSync(out);
-  writeFileSync(join(out, "Pix-0.5.0-mac-arm64.dmg"), "dmg");
-  writeFileSync(join(out, "Pix-0.5.0-mac-arm64.zip"), "zip");
-  writeFileSync(
-    join(out, "latest-mac.yml"),
-    "version: 0.5.0\nfiles:\n  - url: Pix-0.5.0-mac-arm64.zip\n",
-  );
-  const result = collectReleaseAssets({
-    outDir: out,
-    artifactsDir: art,
-    platform: "mac",
-    arch: "arm64",
-  });
-  assert(result.errors.length === 0, `mac collect errors: ${result.errors.join("; ")}`);
-  assert(existsSync(join(art, "latest-mac-arm64.yml")), "mac feed renamed with arch");
-  assert(!existsSync(join(art, "latest-mac.yml")), "mac feed not left un-renamed");
-  rmSync(root, { recursive: true, force: true });
-}
-
-// --- collect: mac without zip fails --------------------------------------------
-
-{
-  const root = mkdtempSync(join(tmpdir(), "pix-rel-mac-bad-"));
-  const out = join(root, "out");
-  const art = join(root, "art");
-  mkdirSync(out);
-  writeFileSync(join(out, "Pix-0.5.0-mac-arm64.dmg"), "dmg");
-  writeFileSync(join(out, "latest-mac.yml"), "version: 0.5.0\n");
-  const result = collectReleaseAssets({
-    outDir: out,
-    artifactsDir: art,
-    platform: "mac",
-    arch: "arm64",
-  });
-  assert(
-    result.errors.some((e) => e.includes("*.zip")),
-    "mac missing zip must fail",
-  );
-  rmSync(root, { recursive: true, force: true });
-}
-
-// --- validate-publish happy path -----------------------------------------------
-
-{
-  const root = mkdtempSync(join(tmpdir(), "pix-rel-pub-"));
-  writeFileSync(join(root, "Pix-0.5.0-win-x64.exe"), "exe");
-  writeFileSync(join(root, "latest.yml"), "version: 0.5.0\n");
-  writeFileSync(join(root, "Pix-0.5.0-mac-arm64.dmg"), "dmg");
-  writeFileSync(join(root, "Pix-0.5.0-mac-arm64.zip"), "zip");
-  writeFileSync(join(root, "Pix-0.5.0-mac-x64.dmg"), "dmg");
-  writeFileSync(join(root, "Pix-0.5.0-mac-x64.zip"), "zip");
-  writeFileSync(
-    join(root, "latest-mac.yml"),
-    "version: 0.5.0\nfiles:\n  - url: Pix-0.5.0-mac-arm64.zip\n  - url: Pix-0.5.0-mac-x64.zip\n",
-  );
-  writeFileSync(join(root, "Pix-0.5.0-linux-x86_64.AppImage"), "app");
-  writeFileSync(join(root, "Pix-0.5.0-linux-amd64.deb"), "deb");
-  writeFileSync(join(root, "latest-linux.yml"), "version: 0.5.0\n");
-  const result = validatePublishAssets(root);
-  assert(result.ok, `publish validate errors: ${result.errors.join("; ")}`);
-  rmSync(root, { recursive: true, force: true });
-}
-
-// --- validate-publish: dmg-only feed fails -------------------------------------
-
-{
-  const root = mkdtempSync(join(tmpdir(), "pix-rel-pub-bad-"));
-  writeFileSync(join(root, "Pix-0.5.0-win-x64.exe"), "exe");
-  writeFileSync(join(root, "latest.yml"), "v\n");
-  writeFileSync(join(root, "Pix-0.5.0-mac-arm64.dmg"), "dmg");
-  writeFileSync(join(root, "Pix-0.5.0-mac-arm64.zip"), "zip");
-  writeFileSync(
-    join(root, "latest-mac.yml"),
-    "version: 0.5.0\nfiles:\n  - url: Pix-0.5.0-mac-arm64.dmg\n",
-  );
-  writeFileSync(join(root, "Pix-0.5.0-linux-x86_64.AppImage"), "app");
-  writeFileSync(join(root, "latest-linux.yml"), "v\n");
-  const result = validatePublishAssets(root);
-  assert(!result.ok, "dmg-only mac feed must fail");
-  assert(
-    result.errors.some((e) => e.includes(".zip")),
-    "error must mention zip reference",
-  );
-  rmSync(root, { recursive: true, force: true });
-}
-
-if (errors.length) {
-  console.error("release-assets.test.mjs FAILED:");
-  for (const e of errors) console.error(`  - ${e}`);
-  process.exit(1);
-}
-console.log("release-assets.test.mjs: ok");
+await test("unsigned manual releases do not advertise an updater payload", () => {
+  const root = mkdtempSync(join(tmpdir(), "pix-release-"));
+  try {
+    for (const [target, platform] of Object.entries(TARGETS))
+      writeFileSync(join(root, `manifest-${target}.json`), JSON.stringify({ target, platform }));
+    manifest(root, "num-scope/pix", "v0.7.7");
+    assert.ok(!existsSync(join(root, "latest.json")));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -82,7 +82,7 @@ export function uiFontStackForFamily(primary: string): string {
   if (!name) return DEFAULT_UI_FONT_FAMILY;
   if (name.includes(",")) return name;
   const quoted = /[\s]/.test(name) ? `"${name.replace(/"/g, "")}"` : name;
-  return `${quoted}, "SF Pro Text", "Segoe UI", system-ui, -apple-system, sans-serif`;
+  return `${quoted}, ${DEFAULT_UI_FONT_FAMILY}`;
 }
 
 /** Build a resilient mono CSS stack (same strategy as terminal fonts). */

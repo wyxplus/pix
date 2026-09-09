@@ -106,6 +106,7 @@ import {
   type SortMode,
 } from "../lib/sidebar-organize.ts";
 import { cn } from "../lib/utils.ts";
+import { formatRelativeTime, RELATIVE_TIME_I18N } from "../lib/relative-time.ts";
 import {
   belongsInConversationsSection,
   isNonProjectWorkspacePath,
@@ -658,7 +659,7 @@ export function ProjectList(props: ProjectListProps) {
           "absolute right-1 top-1/2 z-[1] flex -translate-y-1/2 items-center justify-end gap-0.5",
           "transition-opacity",
           props.hoverOnly
-            ? "pointer-events-none invisible opacity-0 group-hover/item:pointer-events-auto group-hover/item:visible group-hover/item:opacity-100"
+            ? "pointer-events-none invisible opacity-0 group-hover/item:pointer-events-auto group-hover/item:visible group-hover/item:opacity-100 group-focus-within/item:pointer-events-auto group-focus-within/item:visible group-focus-within/item:opacity-100"
             : props.open
               ? "pointer-events-auto opacity-100"
               : "pointer-events-none opacity-0 group-hover/item:pointer-events-auto group-hover/item:opacity-100 group-focus-within/item:pointer-events-auto group-focus-within/item:opacity-100",
@@ -840,6 +841,10 @@ export function ProjectList(props: ProjectListProps) {
         : {}),
     });
     const stateLabel = markerLabel(runMarker?.state, tr, runMarker?.reason);
+    const relativeTime = formatRelativeTime(thread.modifiedAt);
+    const updatedLabel = relativeTime
+      ? tr(RELATIVE_TIME_I18N[relativeTime.key], relativeTime.n ? { n: relativeTime.n } : undefined)
+      : undefined;
 
     return (
       <div
@@ -886,8 +891,8 @@ export function ProjectList(props: ProjectListProps) {
               className={cn(
                 // gap-2 matches project row (folder icon + name) so indented session titles align.
                 "flex h-full min-w-0 flex-1 items-center gap-2 text-left transition-[padding]",
-                // Default: full width (fade to row end). Hover leaves room for actions.
-                "pr-0 group-hover/item:pr-14",
+                // Default: full title width. Hover and focus leave room for actions.
+                "pr-0 group-hover/item:pr-14 group-focus-within/item:pr-14",
               )}
               data-active={selected ? "true" : "false"}
               data-kind={kind}
@@ -912,20 +917,29 @@ export function ProjectList(props: ProjectListProps) {
               {/* Under a project: spacer = Folder icon width so title lines up with project name. */}
               {indent ? <span className="inline-block size-4 shrink-0" aria-hidden /> : null}
               {unread ? (
-                <span className="size-1.5 shrink-0 rounded-full bg-[#0a84ff]" aria-hidden />
+                <span className="size-1.5 shrink-0 rounded-full bg-[var(--link)]" aria-hidden />
               ) : null}
               {pinnedHere ? (
                 <Pin className="size-3 shrink-0 opacity-50" strokeWidth={1.75} aria-hidden />
               ) : null}
               <span
                 className={cn(
-                  "sidebar-title-fade min-w-0 flex-1 overflow-hidden whitespace-nowrap leading-4 text-left",
+                  "sidebar-row-title min-w-0 flex-1 overflow-hidden whitespace-nowrap leading-4 text-left",
                   unread && "font-medium text-[var(--foreground)]",
                 )}
               >
                 {title}
               </span>
-              <ThreadRunMarker marker={runMarker} {...(stateLabel ? { label: stateLabel } : {})} />
+              {updatedLabel && (!runMarker || runMarker.state === "idle") ? (
+                <time className="sidebar-thread-time" dateTime={thread.modifiedAt}>
+                  {updatedLabel}
+                </time>
+              ) : (
+                <ThreadRunMarker
+                  marker={runMarker}
+                  {...(stateLabel ? { label: stateLabel } : {})}
+                />
+              )}
             </button>
             {/* Hover: pin + archive only. Full menu via right-click. */}
             <RowActions hoverOnly testIdPrefix={`${testPrefix}-${thread.id}`}>
@@ -1029,13 +1043,13 @@ export function ProjectList(props: ProjectListProps) {
 
     return (
       <div
-        className="mt-0.5 mb-1 flex flex-col gap-0.5"
+        className="sidebar-project-threads flex flex-col"
         data-testid={active ? "thread-list" : "session-list"}
         data-kind="session"
       >
         {threadsForProject.length === 0 ? (
           <div
-            className="flex h-8 w-full min-w-0 items-center gap-2 px-2.5"
+            className="flex h-8 w-full min-w-0 items-center gap-2 px-2"
             data-testid="session-empty"
             aria-hidden={false}
           >
@@ -1155,7 +1169,7 @@ export function ProjectList(props: ProjectListProps) {
               <Folder className="size-4 shrink-0 opacity-70" strokeWidth={1.75} aria-hidden />
             )}
             <span
-              className="sidebar-title-fade min-w-0 flex-1 overflow-hidden whitespace-nowrap leading-4"
+              className="sidebar-row-title min-w-0 flex-1 overflow-hidden whitespace-nowrap leading-4"
               data-testid={current ? "workspace-name" : undefined}
             >
               {name}
@@ -1247,13 +1261,13 @@ export function ProjectList(props: ProjectListProps) {
   return (
     // Single scroll for 置顶/项目/对话 — avoid flex-squeezing 对话 to zero height.
     <div
-      className="pix-scroll flex min-h-0 min-w-0 flex-1 flex-col gap-0.5"
+      className="sidebar-project-list pix-scroll flex min-h-0 min-w-0 flex-1 flex-col"
       data-testid="project-list"
       data-group-mode={groupMode}
     >
       {/* ── 置顶：list / project 均显示；可折叠 ── */}
       {pinnedPaths.length > 0 ? (
-        <div data-testid="pinned-projects" className="mb-0.5 min-w-0 shrink-0">
+        <div data-testid="pinned-projects" className="min-w-0 shrink-0">
           <div
             className="sidebar-section-head group/section"
             data-expanded={pinnedOpen ? "true" : "false"}
@@ -1362,7 +1376,7 @@ export function ProjectList(props: ProjectListProps) {
       ) : null}
 
       {/* ── 对话：list 模式含全部会话；project 模式仅纯对话。list 模式无「+」。 ── */}
-      <div className="mt-0.5 min-w-0 shrink-0">
+      <div className="min-w-0 shrink-0">
         <div
           className="sidebar-section-head group/section"
           data-expanded={threadsOpen ? "true" : "false"}

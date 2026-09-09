@@ -101,4 +101,30 @@ describe("appearance-prefs", () => {
     expect(n.uiFontFamily).toBe(DEFAULT_UI_FONT_FAMILY);
     expect(n.codeFontFamily).toBe(DEFAULT_CODE_FONT_FAMILY);
   });
+
+  it("upgrades persisted default fonts while retaining sizes and custom selections", () => {
+    localStorage.setItem(
+      "pix.appearance.prefs.v1",
+      JSON.stringify({
+        uiFontSize: 16,
+        codeFontSize: 14,
+        uiFontFamily: '"Inter", "SF Pro Text", "Segoe UI", system-ui, -apple-system, sans-serif',
+        codeFontFamily: '"SF Mono", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace',
+      }),
+    );
+    expect(loadAppearancePrefs()).toEqual({
+      uiFontSize: 16,
+      codeFontSize: 14,
+      uiFontFamily: DEFAULT_UI_FONT_FAMILY,
+      codeFontFamily: DEFAULT_CODE_FONT_FAMILY,
+    });
+    patchAppearancePrefs({
+      uiFontFamily: "Inter, system-ui, sans-serif",
+      codeFontFamily: '"JetBrains Mono", monospace',
+    });
+    expect(loadAppearancePrefs()).toMatchObject({
+      uiFontFamily: "Inter, system-ui, sans-serif",
+      codeFontFamily: '"JetBrains Mono", monospace',
+    });
+  });
 });

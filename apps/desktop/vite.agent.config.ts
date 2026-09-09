@@ -4,7 +4,6 @@ import { resolve } from "node:path";
 import { defineConfig, type Plugin } from "vite-plus";
 
 const external = [
-  "electron",
   "@earendil-works/pi-coding-agent",
   "@silvia-odwyer/photon-node",
   ...builtinModules,

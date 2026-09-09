@@ -1,18 +1,15 @@
-import { test as base, expect, type Page } from "@playwright/test";
-import { _electron as electron, type ElectronApplication } from "playwright";
-import { createRequire } from "node:module";
+import { test as base, expect, type Browser, type Page } from "@playwright/test";
+import { launchTauriHarness } from "./tauri-harness.ts";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { FakeOpenAiServer } from "@pix/test-utils";
 
-const require = createRequire(import.meta.url);
-const electronBinary = require("electron") as string;
 const appDirectory = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 interface LaunchedPix {
-  app: ElectronApplication;
+  app: Awaited<ReturnType<typeof launchTauriHarness>>;
   page: Page;
   root: string;
   /** Isolated `~/.pi/agent` for this launch (`PI_CODING_AGENT_DIR`). */
@@ -27,7 +24,7 @@ export interface PixE2EFixtures {
   page: Page;
 }
 
-async function launchPixApp(): Promise<LaunchedPix> {
+async function launchPixApp(browser: Browser): Promise<LaunchedPix> {
   const root = await mkdtemp(join(tmpdir(), "pix-e2e-"));
   const home = join(root, "home");
   const agentDir = join(home, ".pi", "agent");
@@ -167,19 +164,14 @@ async function launchPixApp(): Promise<LaunchedPix> {
   // Interactive E2E: product cold-start auto-resume is already off via PIX_NO_AUTO_RESUME.
   delete env.ELECTRON_RUN_AS_NODE;
 
-  // Isolate Electron userData so recent workspaces / prefs do not leak across runs.
-  const userData = join(root, "electron-userData");
+  // Isolate Tauri userData so recent workspaces / prefs do not leak across runs.
+  const userData = join(root, "tauri-userData");
   await mkdir(userData, { recursive: true });
 
-  const app = await electron.launch({
-    executablePath: electronBinary,
-    args: [appDirectory, `--user-data-dir=${userData}`],
-    cwd: appDirectory,
-    env,
-    timeout: 60_000,
-  });
-
-  const page = await app.firstWindow({ timeout: 60_000 });
+  env.PIX_DATA_DIR = userData;
+  env.PIX_DOCUMENTS_DIR = join(home, "Documents");
+  const app = await launchTauriHarness(browser, appDirectory, env);
+  const page = app.page;
   await page.waitForSelector('[data-testid="pix-app"]', { timeout: 30_000 });
   // Cold-start overlay (pi ensure + host config) must finish before UI clicks.
   await page.waitForSelector('[data-testid="pix-app"][data-bootstrap-ready="true"]', {
@@ -190,9 +182,8 @@ async function launchPixApp(): Promise<LaunchedPix> {
 }
 
 export const test = base.extend<PixE2EFixtures>({
-  // eslint-disable-next-line no-empty-pattern
-  pix: async ({}, use) => {
-    const launched = await launchPixApp();
+  pix: async ({ browser }, use) => {
+    const launched = await launchPixApp(browser);
     try {
       await use(launched);
     } finally {

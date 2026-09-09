@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vite-plus/test";
@@ -199,6 +199,33 @@ describe("isolation env", () => {
 });
 
 describe("isProvisionStampCurrent", () => {
+  it("refreshes installed runtimes when the archive layout changes at the same version", () => {
+    const { vendorRoot, userData } = makeVendorWithArchives();
+    try {
+      const first = ensureProvisionedRuntimes({
+        userDataPath: userData,
+        explicitVendorRoot: vendorRoot,
+        skipVenv: true,
+      });
+      expect(first?.source).toBe("userData");
+      const nodePath = join(userRuntimesRoot(userData), "node", "bin", "node");
+      writeFileSync(nodePath, "outdated runtime layout");
+      writeFileSync(
+        join(vendorRoot, "manifest.json"),
+        JSON.stringify({ node: "22.19.0", python: "3.12.13", layoutVersion: 2 }),
+      );
+      ensureProvisionedRuntimes({
+        userDataPath: userData,
+        explicitVendorRoot: vendorRoot,
+        skipVenv: true,
+      });
+      expect(readFileSync(nodePath, "utf8")).toContain("echo v22.19.0");
+    } finally {
+      rmSync(vendorRoot, { recursive: true, force: true });
+      rmSync(userData, { recursive: true, force: true });
+    }
+  });
+
   it("returns false when versions mismatch", () => {
     const { vendorRoot, userData } = makeVendorWithArchives();
     try {

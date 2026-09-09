@@ -1,0 +1,14 @@
+{
+  "name": "@pix/sidecar-node",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Production-only dependency closure for the Node Agent Sidecar",
+  "files": [],
+  "type": "module",
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "catalog:",
+    "@silvia-odwyer/photon-node": "catalog:",
+    "node-pty": "catalog:",
+    "undici": "^7.24.0"
+  }
+}

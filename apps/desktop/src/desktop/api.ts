@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, webUtils } from "electron";
+import { ipcRenderer, pathForFile } from "./transport.ts";
 import type {
   AppUpdateStatus,
   HostEvent,
@@ -16,8 +16,7 @@ const api: PixDesktopApi = {
     downloadUpdate: () => ipcRenderer.invoke("pix:app:download-update"),
     quitAndInstall: () => ipcRenderer.invoke("pix:app:quit-and-install"),
     onUpdateStatus(listener) {
-      const handler = (_event: Electron.IpcRendererEvent, status: AppUpdateStatus) =>
-        listener(status);
+      const handler = (_event: undefined, status: AppUpdateStatus) => listener(status);
       ipcRenderer.on("pix:app:update-status", handler);
       return () => ipcRenderer.removeListener("pix:app:update-status", handler);
     },
@@ -33,8 +32,7 @@ const api: PixDesktopApi = {
     close: () => ipcRenderer.invoke("pix:window:close"),
     isMaximized: () => ipcRenderer.invoke("pix:window:is-maximized"),
     onStateChange(listener) {
-      const handler = (_event: Electron.IpcRendererEvent, state: { isMaximized: boolean }) =>
-        listener(state);
+      const handler = (_event: undefined, state: { isMaximized: boolean }) => listener(state);
       ipcRenderer.on("pix:window:state", handler);
       return () => ipcRenderer.removeListener("pix:window:state", handler);
     },
@@ -42,8 +40,7 @@ const api: PixDesktopApi = {
   pi: {
     ensure: () => ipcRenderer.invoke("pix:pi:ensure"),
     onProgress(listener) {
-      const handler = (_event: Electron.IpcRendererEvent, value: PiCliProgressEvent) =>
-        listener(value);
+      const handler = (_event: undefined, value: PiCliProgressEvent) => listener(value);
       ipcRenderer.on("pix:pi:progress", handler);
       return () => ipcRenderer.removeListener("pix:pi:progress", handler);
     },
@@ -69,14 +66,12 @@ const api: PixDesktopApi = {
     dispose: () => ipcRenderer.invoke("pix:terminal:dispose"),
     status: () => ipcRenderer.invoke("pix:terminal:status"),
     onData(listener) {
-      const handler = (_event: Electron.IpcRendererEvent, value: TerminalDataEvent) =>
-        listener(value);
+      const handler = (_event: undefined, value: TerminalDataEvent) => listener(value);
       ipcRenderer.on("pix:terminal:data", handler);
       return () => ipcRenderer.removeListener("pix:terminal:data", handler);
     },
     onExit(listener) {
-      const handler = (_event: Electron.IpcRendererEvent, value: TerminalExitEvent) =>
-        listener(value);
+      const handler = (_event: undefined, value: TerminalExitEvent) => listener(value);
       ipcRenderer.on("pix:terminal:exit", handler);
       return () => ipcRenderer.removeListener("pix:terminal:exit", handler);
     },
@@ -99,7 +94,7 @@ const api: PixDesktopApi = {
     stop: () => ipcRenderer.invoke("pix:host:stop"),
     snapshot: () => ipcRenderer.invoke("pix:host:snapshot"),
     onEvent(listener) {
-      const handler = (_event: Electron.IpcRendererEvent, value: HostEvent) => listener(value);
+      const handler = (_event: undefined, value: HostEvent) => listener(value);
       ipcRenderer.on("pix:host:event", handler);
       return () => ipcRenderer.removeListener("pix:host:event", handler);
     },
@@ -110,7 +105,7 @@ const api: PixDesktopApi = {
     openPath: (cwd, options) => ipcRenderer.invoke("pix:workspace:open-path", cwd, options),
     pickFolder: () => ipcRenderer.invoke("pix:workspace:pick-folder"),
     pickAttachments: (options) => ipcRenderer.invoke("pix:workspace:pick-attachments", options),
-    pathForFile: (file) => webUtils.getPathForFile(file),
+    pathForFile: (file) => pathForFile(file),
     searchPaths: (query, options) =>
       ipcRenderer.invoke("pix:workspace:search-paths", query ?? "", options),
     saveClipboardImage: (options) =>
@@ -187,7 +182,7 @@ const api: PixDesktopApi = {
       ipcRenderer.invoke("pix:providers:oauth-respond", operationId, promptId, value, cancelled),
     cancelOAuth: (operationId) => ipcRenderer.invoke("pix:providers:oauth-cancel", operationId),
     onOAuthEvent(listener) {
-      const handler = (_event: Electron.IpcRendererEvent, value: HostEvent) => {
+      const handler = (_event: undefined, value: HostEvent) => {
         if (value.type !== "providers.oauth") return;
         listener({
           operationId: value.requestId,
@@ -270,4 +265,4 @@ const api: PixDesktopApi = {
   },
 };
 
-contextBridge.exposeInMainWorld("pix", api);
+window.pix = api;

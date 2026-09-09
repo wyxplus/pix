@@ -13,6 +13,7 @@ coverage/
 *.log
 .DS_Store
 test-results/
+test-results-*/
 playwright-report/
 blob-report/
 
@@ -38,3 +39,10 @@ session-*.jsonl
 
 # Local planning docs (not part of the published tree)
 docs/
+
+# Tauri artifacts
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/
+apps/desktop/src-tauri/binaries/
+apps/desktop/src-tauri/resources/
+.pnpm-store/

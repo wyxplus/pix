@@ -5,6 +5,7 @@ import { defineConfig } from "vite-plus";
 export default defineConfig({
   root: resolve(import.meta.dirname, "src/renderer"),
   base: "./",
+  server: { host: "127.0.0.1", port: 1420, strictPort: true },
   plugins: [tailwindcss()],
   resolve: {
     alias: {
@@ -12,6 +13,7 @@ export default defineConfig({
     },
   },
   build: {
+    target: ["es2022", "safari15"],
     outDir: resolve(import.meta.dirname, "dist/renderer"),
     emptyOutDir: true,
     sourcemap: true,
@@ -52,7 +54,13 @@ export default defineConfig({
     },
   },
   test: {
-    include: ["**/*.test.ts", "../agent-host/**/*.test.ts", "../main/**/*.test.ts"],
+    include: [
+      "**/*.test.ts",
+      "../agent-host/**/*.test.ts",
+      "../main/**/*.test.ts",
+      "../sidecar/**/*.test.ts",
+      "../desktop/**/*.test.ts",
+    ],
     exclude: ["**/e2e/**", "**/node_modules/**"],
   },
 });

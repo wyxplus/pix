@@ -16,6 +16,20 @@ const previous = pkg.version;
 pkg.version = version;
 writeFileSync(desktopPackagePath, `${JSON.stringify(pkg, null, 2)}\n`, "utf8");
 
+const cargoPath = join(root, "apps", "desktop", "src-tauri", "Cargo.toml");
+writeFileSync(
+  cargoPath,
+  readFileSync(cargoPath, "utf8").replace(/^(version = ")[^"]+/m, `$1${version}`),
+);
+const lockPath = join(root, "apps", "desktop", "src-tauri", "Cargo.lock");
+writeFileSync(
+  lockPath,
+  readFileSync(lockPath, "utf8").replace(
+    /(name = "pix-desktop"\nversion = ")[^"]+/,
+    `$1${version}`,
+  ),
+);
+
 console.log(`@pix/desktop ${previous} -> ${version}`);
 console.log(`Next: commit, then tag and push:`);
 console.log(`  git tag v${version}`);

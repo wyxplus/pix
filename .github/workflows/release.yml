@@ -1,152 +1,100 @@
-# Tag-driven multi-platform installers + GitHub Release.
-# Push v* → build installers + electron-updater feeds → attach to the release.
-#
-# Required release assets (scripts/release-assets.mjs):
-#   Pix-*-win-x64.exe          + latest.yml  (+ *.blockmap when generated)
-#   Pix-*-mac-{arm64,x64}.dmg  + Pix-*-mac-{arm64,x64}.zip + latest-mac.yml
-#   Pix-*-linux-*.AppImage     + latest-linux.yml  (+ optional .deb / blockmap)
 name: Release
-
 on:
   push:
-    tags:
-      - "v*"
+    tags: ["v*"]
   workflow_dispatch:
-
 concurrency:
-  group: release-${{ github.workflow }}-${{ github.ref }}
+  group: release-${{ github.ref }}
   cancel-in-progress: true
-
 permissions:
   contents: read
-
 jobs:
   package:
-    name: package (${{ matrix.os }})
+    name: package (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
-    env:
-      ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/../.cache/electron-builder
-      ELECTRON_CACHE: ${{ github.workspace }}/../.cache/electron
+    timeout-minutes: 60
     strategy:
-      # One platform failure should stop the matrix (no orphan half-releases).
       fail-fast: true
       matrix:
         include:
           - os: ubuntu-latest
-            platform: linux
+            target: x86_64-unknown-linux-gnu
           - os: windows-latest
-            platform: win
+            target: x86_64-pc-windows-msvc
           - os: macos-latest
-            platform: mac
+            target: aarch64-apple-darwin
           - os: macos-15-intel
-            platform: mac
-
+            target: x86_64-apple-darwin
+    env:
+      PIX_UPDATER_PUBLIC_KEY: ${{ secrets.TAURI_SIGNING_PUBLIC_KEY }}
+      PIX_UPDATER_ENDPOINT: https://github.com/${{ github.repository }}/releases/latest/download/latest.json
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with:
           version: 11.15.1
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build packages
-        run: pnpm build
-
-      - name: Install Electron binary
-        run: pnpm electron:install
-
-      - name: Package desktop installers
-        # Sign only when both CSC_LINK and CSC_KEY_PASSWORD are set. Incomplete
-        # cert env makes electron-builder try to sign and fail with "not a file".
-        # Otherwise force unsigned packaging (matches pre-0.5.1 CI behavior).
-        shell: bash
-        env:
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-        run: |
-          set -euo pipefail
-          if [[ -z "${CSC_LINK:-}" || -z "${CSC_KEY_PASSWORD:-}" ]]; then
-            unset CSC_LINK CSC_KEY_PASSWORD || true
-            export CSC_IDENTITY_AUTO_DISCOVERY=false
-            echo "Packaging without code signature (CSC secrets incomplete or unset)"
-          else
-            echo "Packaging with code signature (CSC_LINK + CSC_KEY_PASSWORD present)"
-          fi
-          pnpm package
-
-      - name: Collect installers and updater feeds
-        shell: bash
-        run: |
-          set -euo pipefail
-          node scripts/release-assets.mjs collect \
-            apps/desktop/release/app \
-            artifacts \
-            --platform "${{ matrix.platform }}" \
-            --arch "${{ runner.arch }}"
-
-      - name: Upload package artifact
-        uses: actions/upload-artifact@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
         with:
-          name: pix-${{ matrix.platform }}-${{ runner.arch }}
+          workspaces: apps/desktop/src-tauri
+      - name: Linux libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Prepare bundled Node and tool runtimes
+        run: pnpm --filter @pix/desktop exec node scripts/prepare-sidecar.mjs --release
+      - name: Verify release version
+        if: github.ref_type == 'tag'
+        run: node scripts/release-assets.mjs check-version "${{ github.ref_name }}"
+      - name: Build installers
+        shell: bash
+        run: |
+          if [[ -n "$PIX_UPDATER_PUBLIC_KEY" && -n "$TAURI_SIGNING_PRIVATE_KEY" ]]; then
+            pnpm --filter @pix/desktop exec tauri build --config '{"bundle":{"createUpdaterArtifacts":true}}'
+          elif [[ -n "$PIX_UPDATER_PUBLIC_KEY" || -n "$TAURI_SIGNING_PRIVATE_KEY" ]]; then
+            echo "Both updater signing public and private keys must be configured" >&2
+            exit 1
+          else
+            pnpm --filter @pix/desktop exec tauri build
+          fi
+      - name: Collect Tauri assets
+        run: node scripts/release-assets.mjs collect apps/desktop/src-tauri/target/release/bundle artifacts --target ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pix-${{ matrix.target }}
           path: artifacts/*
           if-no-files-found: error
           retention-days: 14
-
   publish:
-    name: publish release
     needs: package
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Download all platform archives
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
         with:
           path: release-assets
           pattern: pix-*
           merge-multiple: true
-
-      - name: Merge latest-mac.yml (arm64 + x64)
-        shell: bash
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          mac_yml=(release-assets/latest-mac-*.yml)
-          if [[ ${#mac_yml[@]} -eq 0 ]]; then
-            echo "Missing arch-split latest-mac-*.yml from mac package jobs" >&2
-            ls -la release-assets >&2 || true
-            exit 1
-          fi
-          node scripts/merge-latest-mac-yml.mjs release-assets release-assets/latest-mac.yml
-          rm -f release-assets/latest-mac-*.yml
-          ls -lh release-assets/latest-mac.yml
-
-      - name: Validate release assets
-        shell: bash
-        run: node scripts/release-assets.mjs validate-publish release-assets
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+      - name: Validate artifacts and create signed updater manifest
+        run: node scripts/release-assets.mjs manifest release-assets "${{ github.repository }}" "${{ github.ref_name }}"
+      - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: release-assets/*
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

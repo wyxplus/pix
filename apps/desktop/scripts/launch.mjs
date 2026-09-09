@@ -1,39 +1,42 @@
-/**
- * Desktop launcher (no watch). Used by `pnpm dev` after build.
- *
- * - Interactive: real HOME and last durable workspace.
- * - Isolated (`PIX_ISOLATED=1`): temp HOME, fixture workspace, fake model.
- */
-import { spawn } from "node:child_process";
-import { dirname, join } from "node:path";
+import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { prepareLaunchEnv } from "./launch-env.mjs";
-
+import { runDevSession } from "./dev-session.mjs";
 const require = createRequire(import.meta.url);
-const electron = require("electron");
-const appDirectory = join(dirname(fileURLToPath(import.meta.url)), "..");
-
-const isolated = process.env.PIX_ISOLATED === "1";
-const prepared = await prepareLaunchEnv({ isolated });
-
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+execFileSync(pnpm, ["run", "build"], {
+  cwd: root,
+  stdio: "inherit",
+  shell: process.platform === "win32",
+});
+execFileSync(process.execPath, [join(root, "scripts/prepare-sidecar.mjs")], {
+  cwd: root,
+  stdio: "inherit",
+});
+const prepared = await prepareLaunchEnv({ isolated: process.env.PIX_ISOLATED === "1" });
 console.log(prepared.label);
-let exitCode = 1;
 try {
-  const child = spawn(electron, [appDirectory], {
-    cwd: appDirectory,
-    env: prepared.environment,
-    stdio: "inherit",
-  });
-  exitCode = await new Promise((resolve, reject) => {
-    child.once("error", reject);
-    child.once("exit", (code, signal) => {
-      if (signal) reject(new Error(`Electron exited from signal ${signal}`));
-      else resolve(code ?? 1);
-    });
+  process.exitCode = await runDevSession({
+    configFile: join(root, "vite.renderer.config.ts"),
+    cwd: root,
+    env: {
+      ...prepared.environment,
+      // Isolated app HOME must not hide the developer's installed Rust toolchain.
+      CARGO_HOME: process.env.CARGO_HOME || join(homedir(), ".cargo"),
+      RUSTUP_HOME: process.env.RUSTUP_HOME || join(homedir(), ".rustup"),
+    },
+    command: process.execPath,
+    args: (devUrl) => [
+      require.resolve("@tauri-apps/cli/tauri.js"),
+      "dev",
+      "--config",
+      JSON.stringify({ build: { beforeDevCommand: null, devUrl } }),
+    ],
   });
 } finally {
   await prepared.cleanup();
 }
-
-process.exitCode = exitCode;

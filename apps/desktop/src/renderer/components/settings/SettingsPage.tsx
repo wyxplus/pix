@@ -3063,7 +3063,7 @@ function ProviderAuthScope(
       {configProvider && typeof document !== "undefined"
         ? createPortal(
             <div
-              className="fixed inset-0 z-[11000] flex items-center justify-center bg-black/50 p-4"
+              className="desktop-dialog-overlay fixed inset-0 z-[11000] flex items-center justify-center p-4"
               data-testid="provider-config-dialog"
               role="dialog"
               aria-modal="true"
@@ -3073,7 +3073,7 @@ function ProviderAuthScope(
               }}
             >
               <form
-                className="provider-oauth-dialog surface-panel w-full max-w-[32rem] overflow-hidden shadow-2xl"
+                className="provider-oauth-dialog surface-panel w-full max-w-[32rem] overflow-hidden shadow-[var(--shadow-soft)]"
                 data-testid="provider-key-form"
                 onSubmit={(event) => void saveApiKey(event)}
                 onMouseDown={(event) => event.stopPropagation()}
@@ -3167,7 +3167,7 @@ function ProviderAuthScope(
       {oauthDialog && typeof document !== "undefined"
         ? createPortal(
             <div
-              className="fixed inset-0 z-[11000] flex items-center justify-center bg-black/50 p-4"
+              className="desktop-dialog-overlay fixed inset-0 z-[11000] flex items-center justify-center p-4"
               data-testid="provider-oauth-dialog"
               role="dialog"
               aria-modal="true"
@@ -3177,7 +3177,7 @@ function ProviderAuthScope(
               }}
             >
               <div
-                className="provider-oauth-dialog surface-panel w-full max-w-[32rem] overflow-hidden shadow-2xl"
+                className="provider-oauth-dialog surface-panel w-full max-w-[32rem] overflow-hidden shadow-[var(--shadow-soft)]"
                 onMouseDown={(event) => event.stopPropagation()}
               >
                 <div className="provider-oauth-header">
@@ -4300,7 +4300,7 @@ function ModelsSectionContent(
       {dialogOpen && typeof document !== "undefined"
         ? createPortal(
             <div
-              className="fixed inset-0 z-[11000] flex items-center justify-center bg-black/50 p-4"
+              className="desktop-dialog-overlay fixed inset-0 z-[11000] flex items-center justify-center p-4"
               data-testid="models-custom-dialog"
               role="dialog"
               aria-modal="true"
@@ -4310,7 +4310,7 @@ function ModelsSectionContent(
               }}
             >
               <div
-                className="models-custom-dialog surface-panel flex max-h-[min(88vh,720px)] w-full max-w-[40rem] flex-col overflow-hidden shadow-2xl"
+                className="models-custom-dialog surface-panel flex max-h-[min(88vh,720px)] w-full max-w-[40rem] flex-col overflow-hidden shadow-[var(--shadow-soft)]"
                 onMouseDownCapture={(event) => {
                   const target = event.target;
                   if (

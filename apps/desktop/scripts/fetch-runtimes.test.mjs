@@ -148,12 +148,14 @@ function assertEqual(actual, expected, message) {
     mkdirSync(bin, { recursive: true });
     mkdirSync(join(lib, "idlelib"), { recursive: true });
     mkdirSync(join(lib, "encodings"), { recursive: true });
+    mkdirSync(join(lib, "ensurepip", "_bundled"), { recursive: true });
     mkdirSync(join(pyRoot, "lib", "tcl9.0"), { recursive: true });
     mkdirSync(join(pyRoot, "include"), { recursive: true });
     writeFileSync(join(bin, "python3"), "#!/bin/sh\n", { mode: 0o755 });
     writeFileSync(join(bin, "idle3"), "#!/bin/sh\n", { mode: 0o755 });
     writeFileSync(join(lib, "idlelib", "x.py"), "pass\n");
     writeFileSync(join(lib, "encodings", "utf_8.py"), "pass\n");
+    writeFileSync(join(lib, "ensurepip", "_bundled", "pip.whl"), "pip wheel fixture");
     writeFileSync(join(pyRoot, "lib", "tcl9.0", "init.tcl"), "# tcl\n");
     writeFileSync(join(pyRoot, "include", "Python.h"), "/* headers */\n");
     mkdirSync(join(lib, "__pycache__"), { recursive: true });
@@ -163,6 +165,10 @@ function assertEqual(actual, expected, message) {
 
     assert(existsSync(join(bin, "python3")), "python3 kept");
     assert(existsSync(join(lib, "encodings", "utf_8.py")), "stdlib encodings kept");
+    assert(
+      existsSync(join(lib, "ensurepip", "_bundled", "pip.whl")),
+      "ensurepip wheels kept so managed venvs can install pip",
+    );
     assert(!existsSync(join(lib, "idlelib")), "idlelib removed");
     assert(!existsSync(join(pyRoot, "lib", "tcl9.0")), "tcl removed");
     assert(!existsSync(join(pyRoot, "include")), "include removed");

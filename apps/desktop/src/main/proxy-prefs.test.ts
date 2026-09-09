@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
   applyProxyChannelToEnv,
-  electronProxyConfig,
   normalizeProxyPrefs,
   withNodeEnvProxyFlag,
 } from "./proxy-prefs.ts";
@@ -44,16 +43,6 @@ describe("proxy-prefs", () => {
     );
     expect(env.HTTPS_PROXY).toBeUndefined();
     expect(env.PATH).toBe("y");
-  });
-
-  it("maps electron session configs", () => {
-    expect(electronProxyConfig({ mode: "off" })).toEqual({ mode: "direct" });
-    expect(electronProxyConfig({ mode: "system" })).toEqual({ mode: "system" });
-    expect(electronProxyConfig({ mode: "custom", server: "http://127.0.0.1:7890" })).toEqual({
-      mode: "fixed_servers",
-      proxyRules: "http://127.0.0.1:7890",
-      proxyBypassRules: "<local>",
-    });
   });
 
   it("sets NODE_USE_ENV_PROXY when proxy present", () => {

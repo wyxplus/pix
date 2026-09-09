@@ -10,9 +10,9 @@ const nodeBuiltins = [...builtinModules, ...builtinModules.map((name) => `node:$
  * Same external policy as vite.agent.config.ts.
  */
 function isExternal(id: string): boolean {
-  if (id === "electron") return true;
-  if (id === "electron-updater" || id.startsWith("electron-updater/")) return true;
+  if (id === "undici") return true;
   if (id === "node-pty" || id.startsWith("node-pty/")) return true;
+  if (id.startsWith("@silvia-odwyer/")) return true;
   if (id.startsWith("@earendil-works/")) return true;
   if (id.startsWith("node:")) return true;
   if (nodeBuiltins.includes(id)) return true;
@@ -24,13 +24,13 @@ function isExternal(id: string): boolean {
 export default defineConfig({
   build: {
     target: "node24",
-    outDir: resolve(import.meta.dirname, "dist/main"),
+    outDir: resolve(import.meta.dirname, "dist/sidecar"),
     emptyOutDir: true,
     sourcemap: true,
     lib: {
-      entry: resolve(import.meta.dirname, "src/main/index.ts"),
+      entry: resolve(import.meta.dirname, "src/sidecar/index.ts"),
       formats: ["es"],
-      fileName: () => "main.mjs",
+      fileName: () => "sidecar.mjs",
     },
     rollupOptions: {
       external: isExternal,

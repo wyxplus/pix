@@ -1111,6 +1111,7 @@ function shadowValue(shadow: ThemeSkinMaterials["shadow"]): string {
 
 function isSafeThemeAssetUrl(value: string | undefined, allowBuiltin = false): value is string {
   if (!value) return false;
+  if (/^data:image\/(?:png|jpeg|webp);base64,[a-z0-9+/=]+$/i.test(value)) return true;
   if (allowBuiltin && BUILTIN_BACKGROUND_URLS.has(value)) return true;
   // Bundled assets may arrive with cache-busting query strings after HMR/build.
   if (allowBuiltin) {

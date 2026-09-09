@@ -34,7 +34,7 @@ import {
   Cpu,
 } from "lucide-react";
 import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   TITLEBAR_CONTROL_SIZE_PX,
@@ -45,7 +45,11 @@ import {
 } from "../lib/desktop-chrome.ts";
 import { t, type Locale, type MessageKey } from "../lib/i18n.ts";
 import { SHELL_SIDEBAR } from "../lib/layout.ts";
-import { clampSidebarWidth, SIDEBAR_COLLAPSED_WIDTH } from "../lib/sidebar-prefs.ts";
+import {
+  clampSidebarWidth,
+  SIDEBAR_COLLAPSED_WIDTH,
+  SIDEBAR_MOTION_MS,
+} from "../lib/sidebar-prefs.ts";
 import { loadGroupMode, type GroupMode } from "../lib/sidebar-organize.ts";
 import { cn } from "../lib/utils.ts";
 import type { SessionMarker } from "../lib/session-markers.ts";
@@ -69,6 +73,8 @@ export interface AppSidebarProps {
   /** @deprecated prefer sessionMarkers */
   runningSessions?: Record<string, true>;
   collapsed: boolean;
+  /** Temporary navigation above the content in a compact window. */
+  overlay?: boolean;
   widthPx: number;
   /**
    * Native frosted rail (legacy translucent). Mutually exclusive with material glass.
@@ -126,8 +132,44 @@ export interface AppSidebarProps {
 export function AppSidebar(props: AppSidebarProps) {
   const tr = (key: MessageKey, vars?: Record<string, string>) => t(props.locale, key, vars);
   const dragRef = useRef<{ startX: number; startW: number } | null>(null);
+  const asideRef = useRef<HTMLElement>(null);
   const leadingGutterPx = titlebarLeadingGutterPx(isMacDesktopChrome());
   const [showDeveloperChrome, setShowDeveloperChrome] = useState(false);
+  const [contentPresent, setContentPresent] = useState(!props.collapsed);
+  const lastOpenLayout = useRef({ width: props.widthPx, overlay: props.overlay === true });
+
+  useLayoutEffect(() => {
+    if (!props.collapsed) {
+      lastOpenLayout.current = { width: props.widthPx, overlay: props.overlay === true };
+    }
+  }, [props.collapsed, props.widthPx, props.overlay]);
+
+  useEffect(() => {
+    if (!props.collapsed) {
+      setContentPresent(true);
+      return;
+    }
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // Keep exiting text in place; interrupted transitions cancel this removal.
+    const timer = window.setTimeout(
+      () => setContentPresent(false),
+      reducedMotion ? 0 : SIDEBAR_MOTION_MS + 50,
+    );
+    return () => window.clearTimeout(timer);
+  }, [props.collapsed]);
+
+  useEffect(() => {
+    if (!props.overlay) return;
+    asideRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    return () => {
+      requestAnimationFrame(() => {
+        // Navigation may have focused the composer or opened another dialog.
+        const focused = document.activeElement;
+        if (focused && focused !== document.body && !asideRef.current?.contains(focused)) return;
+        document.querySelector<HTMLButtonElement>('[data-testid="sidebar-collapse"]')?.focus();
+      });
+    };
+  }, [props.overlay]);
 
   useEffect(() => {
     let cancelled = false;
@@ -154,6 +196,8 @@ export function AppSidebar(props: AppSidebarProps) {
       const startW = props.widthPx;
       dragRef.current = { startX, startW };
       const target = event.currentTarget;
+      const shell = target.closest<HTMLElement>('[data-testid="pix-app"]');
+      shell?.setAttribute("data-sidebar-resizing", "true");
       target.setPointerCapture(event.pointerId);
 
       const onMove = (ev: PointerEvent) => {
@@ -165,27 +209,47 @@ export function AppSidebar(props: AppSidebarProps) {
       };
       const onUp = (ev: PointerEvent) => {
         dragRef.current = null;
-        target.releasePointerCapture(ev.pointerId);
+        if (target.hasPointerCapture(ev.pointerId)) target.releasePointerCapture(ev.pointerId);
+        shell?.removeAttribute("data-sidebar-resizing");
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onUp);
       };
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onUp);
     },
     [props],
   );
 
   const isSettings = props.view === "settings";
   const railWidth = props.collapsed ? SIDEBAR_COLLAPSED_WIDTH : props.widthPx;
+  const renderContent = !props.collapsed || contentPresent;
+  const contentWidth = props.collapsed ? lastOpenLayout.current.width : props.widthPx;
+  const visualOverlay =
+    props.overlay || (props.collapsed && contentPresent && lastOpenLayout.current.overlay);
 
   return (
     <>
+      {visualOverlay ? (
+        <button
+          type="button"
+          className="sidebar-backdrop"
+          data-testid="sidebar-backdrop"
+          data-open={props.overlay ? "true" : "false"}
+          tabIndex={-1}
+          aria-label={tr("nav.collapseSidebar")}
+          onClick={props.onToggleCollapse}
+        />
+      ) : null}
       <aside
+        ref={asideRef}
+        id="app-sidebar"
         className={cn(
           // Overlay rail so frosted glass can expose the native window material behind it.
           // Never allow horizontal scroll; full collapse uses width 0 (not an icon strip).
-          "absolute inset-y-0 left-0 z-30 flex h-full min-w-0 flex-col overflow-x-hidden text-[var(--sidebar-foreground)]",
-          props.collapsed
+          "pix-sidebar absolute inset-y-0 left-0 z-30 flex h-full min-w-0 flex-col overflow-x-hidden text-[var(--sidebar-foreground)]",
+          props.collapsed && !contentPresent
             ? "pointer-events-none border-0"
             : cn(
                 "border-r",
@@ -197,23 +261,74 @@ export function AppSidebar(props: AppSidebarProps) {
               ),
         )}
         style={{ width: railWidth }}
+        inert={props.collapsed}
         data-testid="sidebar"
         data-slot="sidebar-container"
         data-collapsed={props.collapsed ? "true" : "false"}
+        data-overlay={visualOverlay ? "true" : "false"}
         data-sidebar-translucent={props.translucent ? "true" : "false"}
         data-sidebar-glass={props.glass ? "true" : "false"}
         aria-hidden={props.collapsed ? true : undefined}
+        role={props.overlay ? "dialog" : undefined}
+        aria-modal={props.overlay ? true : undefined}
+        aria-label={tr("nav.sidebar")}
+        onTransitionEnd={(event) => {
+          if (
+            event.target === event.currentTarget &&
+            event.propertyName === "width" &&
+            props.collapsed
+          ) {
+            setContentPresent(false);
+          }
+        }}
+        onKeyDown={(event) => {
+          if (!props.overlay || event.defaultPrevented) return;
+          if (event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+            props.onToggleCollapse();
+          }
+          if (event.key !== "Tab" || !asideRef.current?.contains(event.target as Node)) return;
+          const controls = Array.from(
+            asideRef.current.querySelectorAll<HTMLElement>(
+              'button, a[href], input, select, textarea, summary, [tabindex="0"]',
+            ),
+          ).filter((element) => {
+            const closedDetails = element.closest("details:not([open])");
+            return (
+              element.tabIndex >= 0 &&
+              !element.matches(":disabled") &&
+              !element.closest('.sr-only, [aria-hidden="true"]') &&
+              (!closedDetails || closedDetails.querySelector("summary") === element) &&
+              element.getClientRects().length > 0
+            );
+          });
+          const first = controls[0];
+          const last = controls.at(-1);
+          if (event.shiftKey && event.target === first) {
+            event.preventDefault();
+            last?.focus();
+          } else if (!event.shiftKey && event.target === last) {
+            event.preventDefault();
+            first?.focus();
+          }
+        }}
       >
-        {!props.collapsed ? (
-          <div className="flex h-full min-h-0 min-w-0 flex-col overflow-x-hidden">
+        {renderContent ? (
+          <div
+            className="sidebar-motion-content flex h-full min-h-0 min-w-0 flex-col overflow-x-hidden"
+            style={{ width: contentWidth }}
+          >
             {/* Product: traffic lights + collapse. Settings: gutter only (Codex rail has no collapse). */}
             <TitlebarTrafficRow
               leadingGutterPx={leadingGutterPx}
-              showCollapse={!isSettings}
+              showCollapse={!isSettings || props.overlay === true}
               onToggleCollapse={props.onToggleCollapse}
+              label={tr("nav.collapseSidebar")}
+              interactive={!props.collapsed}
             />
 
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-1 overflow-x-hidden px-2.5 pb-2">
+            <div className="sidebar-content">
               {isSettings ? (
                 <SettingsRail
                   locale={props.locale}
@@ -227,16 +342,18 @@ export function AppSidebar(props: AppSidebarProps) {
             </div>
 
             {/* Drag resize handle */}
-            <div
-              role="separator"
-              aria-orientation="vertical"
-              aria-valuenow={props.widthPx}
-              aria-valuemin={SHELL_SIDEBAR.minPx}
-              aria-valuemax={SHELL_SIDEBAR.maxPx}
-              data-testid="sidebar-resize-handle"
-              className="absolute top-0 right-0 z-10 h-full w-1 cursor-col-resize bg-transparent hover:bg-[var(--hover-fill)] active:bg-[var(--hover-fill)]"
-              onPointerDown={onResizePointerDown}
-            />
+            {!props.overlay ? (
+              <div
+                role="separator"
+                aria-orientation="vertical"
+                aria-valuenow={props.widthPx}
+                aria-valuemin={SHELL_SIDEBAR.minPx}
+                aria-valuemax={SHELL_SIDEBAR.maxPx}
+                data-testid="sidebar-resize-handle"
+                className="absolute top-0 right-0 z-10 h-full w-1 cursor-col-resize bg-transparent hover:bg-[var(--hover-fill)] active:bg-[var(--hover-fill)]"
+                onPointerDown={onResizePointerDown}
+              />
+            ) : null}
           </div>
         ) : null}
       </aside>
@@ -257,8 +374,10 @@ export function AppSidebar(props: AppSidebarProps) {
             <button
               type="button"
               data-testid="sidebar-collapse"
-              title="Expand sidebar"
-              aria-label="Expand sidebar"
+              title={tr("nav.expandSidebar")}
+              aria-label={tr("nav.expandSidebar")}
+              aria-expanded={false}
+              aria-controls="app-sidebar"
               className="sidebar-expand-btn no-drag"
               style={{
                 left: leadingGutterPx,
@@ -289,6 +408,8 @@ function TitlebarTrafficRow(props: {
   leadingGutterPx: number;
   showCollapse?: boolean;
   onToggleCollapse: () => void;
+  label: string;
+  interactive: boolean;
 }) {
   const showCollapse = props.showCollapse !== false;
   return (
@@ -305,10 +426,12 @@ function TitlebarTrafficRow(props: {
       {showCollapse ? (
         <button
           type="button"
-          data-testid="sidebar-collapse"
-          title="Collapse sidebar"
-          aria-label="Collapse sidebar"
-          className="inline-flex shrink-0 items-center justify-center rounded-lg text-[var(--muted-foreground)] hover:bg-[var(--hover-fill)] hover:text-[var(--sidebar-foreground)]"
+          data-testid={props.interactive ? "sidebar-collapse" : undefined}
+          title={props.label}
+          aria-label={props.label}
+          aria-expanded={true}
+          aria-controls="app-sidebar"
+          className="sidebar-icon-button no-drag ml-auto mr-3"
           style={{
             width: TITLEBAR_CONTROL_SIZE_PX,
             height: TITLEBAR_CONTROL_SIZE_PX,
@@ -339,21 +462,16 @@ function ProductRail(
 
   return (
     <>
-      {/* Brand row: title left-aligned with nav/list rows (same px-2.5 content inset). */}
-      <div
-        className="mb-1 flex h-10 items-center justify-between gap-2"
-        data-testid="sidebar-home-header"
-      >
+      {/* Compact product header shares its inset with navigation and section labels. */}
+      <div className="sidebar-home-header" data-testid="sidebar-home-header">
         <button
           type="button"
           data-testid="brand-menu"
           title={tr("app.name")}
-          className="flex min-w-0 flex-1 items-center rounded-md px-2.5 py-0.5 text-left transition-colors hover:bg-[var(--hover-fill)]"
+          className="sidebar-brand-button"
           onClick={props.onOpenPalette}
         >
-          <span className="truncate text-[18px] leading-none font-semibold tracking-tight text-[var(--sidebar-foreground)]">
-            {tr("app.name")}
-          </span>
+          <span className="truncate">{tr("app.name")}</span>
         </button>
         <IconBtn testId="open-palette" title={tr("nav.search")} onClick={props.onOpenPalette}>
           <Search className="h-4 w-4" strokeWidth={1.6} />
@@ -365,7 +483,7 @@ function ProductRail(
 
       {/* Primary action — pure conversation (protrusion shows 选择项目). Project-bound new
           sessions only come from each project row action. */}
-      <nav className="mb-2 flex flex-col gap-0" aria-label="Primary">
+      <nav className="sidebar-primary-nav" aria-label="Primary">
         <button
           type="button"
           data-testid="start-host"
@@ -432,7 +550,7 @@ function ProductRail(
         onForkThread={props.onForkThread}
       />
 
-      <div className="mt-auto flex min-w-0 flex-col gap-1 border-t border-[var(--sidebar-border)] pt-2">
+      <div className="sidebar-footer">
         <div className="flex min-w-0 items-center gap-0.5" data-testid="nav-settings-row">
           <div className="min-w-0 flex-1">
             <NavBtn
@@ -443,7 +561,7 @@ function ProductRail(
               onClick={props.onOpenSettings}
             />
           </div>
-          <SidebarUpdateButton locale={props.locale} tr={tr} />
+          <SidebarUpdateButton tr={tr} />
         </div>
         {props.showDeveloperChrome ? (
           <details
@@ -768,19 +886,8 @@ function hostPillClass(state: string): string {
   return "bg-[var(--accent)] text-[var(--muted-foreground)]";
 }
 
-const GITHUB_REPO_URL = "https://github.com/num-scope/pix";
-
-/** GitHub mark (lucide has no brand icons). */
-function GitHubMark(props: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden className={props.className}>
-      <path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844a9.59 9.59 0 0 1 2.504.337c1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0 0 22 12.017C22 6.484 17.522 2 12 2Z" />
-    </svg>
-  );
-}
-
 type SidebarUpdatePhase =
-  | "github"
+  | "hidden"
   | "available"
   | "downloading"
   | "downloaded"
@@ -793,7 +900,7 @@ function sidebarUpdatePhase(status: AppUpdateStatus): SidebarUpdatePhase {
   if (status.state === "downloading") return "downloading";
   if (status.state === "downloaded") return "downloaded";
   if (status.state === "available") return "available";
-  return "github";
+  return "hidden";
 }
 
 function SidebarUpdateProgress(props: { percent: number | undefined }) {
@@ -841,11 +948,10 @@ function SidebarUpdateProgress(props: { percent: number | undefined }) {
 }
 
 /**
- * Right of 系统设置: GitHub by default; blue download when an update exists;
+ * Right of 系统设置: hidden by default; blue download when an update exists;
  * progress while downloading (locked); restart when ready; installing feedback (locked).
  */
 function SidebarUpdateButton(props: {
-  locale: Locale;
   tr: (key: MessageKey, vars?: Record<string, string>) => string;
 }) {
   const { tr } = props;
@@ -878,11 +984,7 @@ function SidebarUpdateButton(props: {
   }, []);
 
   async function onClick() {
-    if (locked) return;
-    if (phase === "github") {
-      void window.pix.workspace.openExternal(GITHUB_REPO_URL).catch(() => undefined);
-      return;
-    }
+    if (locked || phase === "hidden") return;
     if (phase === "available" || phase === "error") {
       setBusy(true);
       try {
@@ -914,6 +1016,8 @@ function SidebarUpdateButton(props: {
     }
   }
 
+  if (phase === "hidden") return null;
+
   const title =
     phase === "error"
       ? tr("nav.update.error", { error: status.error ?? "Unknown error" })
@@ -925,9 +1029,7 @@ function SidebarUpdateButton(props: {
             : tr("nav.update.downloading")
           : phase === "installing"
             ? tr("nav.update.installing")
-            : phase === "downloaded"
-              ? tr("nav.update.restartInstall")
-              : tr("nav.update.github");
+            : tr("nav.update.restartInstall");
 
   return (
     <button
@@ -951,9 +1053,7 @@ function SidebarUpdateButton(props: {
               ? "bg-blue-500/[0.08] text-blue-500 ring-1 ring-inset ring-blue-500/15 opacity-90"
               : phase === "installing"
                 ? "bg-blue-500 text-white shadow-sm shadow-blue-500/25 opacity-95"
-                : phase === "downloaded"
-                  ? "bg-blue-500 text-white shadow-sm shadow-blue-500/25 hover:bg-blue-600 hover:text-white active:scale-95"
-                  : "text-[var(--muted-foreground)] hover:bg-[var(--hover-fill)] hover:text-[var(--sidebar-foreground)] active:scale-95",
+                : "bg-blue-500 text-white shadow-sm shadow-blue-500/25 hover:bg-blue-600 hover:text-white active:scale-95",
       )}
       onClick={(event) => {
         event.preventDefault();
@@ -962,9 +1062,7 @@ function SidebarUpdateButton(props: {
         void onClick();
       }}
     >
-      {phase === "github" ? (
-        <GitHubMark className="size-4" />
-      ) : phase === "error" ? (
+      {phase === "error" ? (
         <CircleAlert className="size-4" strokeWidth={1.85} />
       ) : phase === "available" ? (
         <span className="relative inline-flex size-5 items-center justify-center">
@@ -999,7 +1097,7 @@ function IconBtn(props: {
       data-testid={props.testId}
       title={props.title}
       aria-label={props.title}
-      className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-[var(--muted-foreground)] hover:bg-[var(--hover-fill)] hover:text-[var(--sidebar-foreground)]"
+      className="sidebar-icon-button"
       onClick={props.onClick}
     >
       {props.children}
@@ -1031,7 +1129,7 @@ function NavBtn(props: {
       <span className="min-w-0 flex-1 truncate">{props.label}</span>
       {props.badge !== undefined ? (
         <span
-          className="ml-auto shrink-0 text-[11px] text-[var(--text-subtle)]"
+          className="nav-badge"
           data-testid={props.testId === "nav-packages" ? "nav-packages-badge" : undefined}
         >
           {props.badge}

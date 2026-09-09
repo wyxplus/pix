@@ -44,6 +44,7 @@ export type ProvisionedRuntimeLayout = {
 };
 
 export type ProvisionStamp = {
+  layoutVersion?: number;
   node?: string;
   python?: string;
   pythonReleaseTag?: string;
@@ -152,6 +153,8 @@ export function isProvisionStampCurrent(
   const manifest =
     vendor.archives?.manifest ??
     (vendor.expanded ? readManifestFile(vendor.expanded.manifestPath) : undefined);
+  if (manifest?.layoutVersion !== undefined && stamp.layoutVersion !== manifest.layoutVersion)
+    return false;
   const expectedNode = manifest?.node;
   const expectedPython = manifest?.python;
   if (expectedNode && stamp.node !== expectedNode) return false;
@@ -233,7 +236,10 @@ export function ensureIsolationDirs(options: {
     existsSync(join(pythonVenv, "Scripts", "python3.exe"));
 
   const pyBin = options.pythonBinary;
-  if (!venvHasPython && pyBin && existsSync(pyBin)) {
+  const hasPip =
+    existsSync(join(pythonVenv, "bin", "pip")) ||
+    existsSync(join(pythonVenv, "Scripts", "pip.exe"));
+  if ((!venvHasPython || !hasPip) && pyBin && existsSync(pyBin)) {
     try {
       rmSync(pythonVenv, { recursive: true, force: true });
       execFileSync(pyBin, ["-m", "venv", pythonVenv], {
@@ -381,6 +387,9 @@ export function ensureProvisionedRuntimes(options: {
         );
         const nextStamp: ProvisionStamp = {
           provisionedAt: new Date().toISOString(),
+          ...(vendor.archives.manifest.layoutVersion !== undefined
+            ? { layoutVersion: vendor.archives.manifest.layoutVersion }
+            : {}),
           ...(vendor.archives.manifest.node ? { node: vendor.archives.manifest.node } : {}),
           ...(vendor.archives.manifest.python ? { python: vendor.archives.manifest.python } : {}),
           ...(vendor.archives.manifest.pythonReleaseTag

@@ -1,155 +1,105 @@
 # Pix
 
-Pix is a desktop shell for the [pi](https://pi.dev) coding agent: a Codex-style UI that keeps configuration, packages, sessions, and tools on the native pi side (`~/.pi/agent`).
-
-## Screenshots
-
-Pix desktop shell — sidebar, session workspace, and composer:
-
-![Pix desktop](./assets/screenshots/pix-desktop.png)
-
-## Requirements
-
-- Node.js 22.19 or newer
-- pnpm 11.15.1
-
-## Setup
-
-```bash
-pnpm install
-pnpm electron:install
-```
-
-`electron:install` downloads the Electron 43 runtime for your platform.
-
-## Develop
-
-Apps have **independent** `dev` / `build` entry points at the repo root:
-
-| App                          | Dev                | Build                | Notes                                  |
-| ---------------------------- | ------------------ | -------------------- | -------------------------------------- |
-| **Desktop** (`apps/desktop`) | `pnpm dev:desktop` | `pnpm build:desktop` | `pnpm dev` is an alias for desktop     |
-| **Landing** (`apps/landing`) | `pnpm dev:landing` | `pnpm build:landing` | Preview: `pnpm preview:landing`        |
-| **All packages**             | —                  | `pnpm build`         | Recursive `build` across the workspace |
-
-### Desktop
-
-```bash
-pnpm dev:desktop   # or: pnpm dev
-pnpm build:desktop # compile only (no Electron launch)
-```
-
-Builds renderer / preload / main / agent-host, then launches Electron. Restart after source changes.
-
-Product launch uses your real `HOME` and the same agent dir as the CLI (`~/.pi/agent` / `PI_CODING_AGENT_DIR`). Models, API keys, settings, packages, and tools match interactive `pi`. The last workspace is restored from desktop prefs; no temp workspace is created on every start.
-
-Optional isolated launch (temp home + fixture workspace + fake model):
-
-```bash
-PIX_ISOLATED=1 pnpm dev:desktop
-```
-
-Browser-only chat timeline preview (no Electron), for iterating on session content rendering:
-
-```bash
-pnpm demo:session-content
-# → http://127.0.0.1:4177/session-content-demo.html
-```
-
-Re-run after renderer changes. Do not open the built HTML via `file://`.
-
-### Landing page
-
-```bash
-pnpm dev:landing      # http://localhost:5174
-pnpm build:landing    # static site → apps/landing/dist
-pnpm preview:landing  # serve the production build
-```
-
-## Validate
-
-```bash
-pnpm check        # lint + types + format (same as Ubuntu CI)
-pnpm check:types  # lint + types only
-pnpm fmt          # auto-fix formatting
-pnpm test
-pnpm build        # all workspace packages (desktop + landing + libs)
-```
-
-## Package (desktop)
-
-```bash
-pnpm package   # platform installers + electron-updater feeds for this OS
-```
-
-Output: `apps/desktop/release/app/` (unsigned in CI — no code-signing certs yet).
-
-### GitHub Release assets
-
-Each tagged release publishes only what installers and **electron-updater** need:
-
-| Asset                                       | Role                                        |
-| ------------------------------------------- | ------------------------------------------- |
-| `Pix-*-win-x64.exe`                         | Windows install (NSIS)                      |
-| `latest.yml`                                | Windows update feed                         |
-| `Pix-*-mac-arm64.dmg` / `Pix-*-mac-x64.dmg` | macOS manual install                        |
-| `Pix-*-mac-arm64.zip` / `Pix-*-mac-x64.zip` | macOS **auto-update** payload               |
-| `latest-mac.yml`                            | macOS update feed (lists both zips)         |
-| `Pix-*-linux-*.AppImage`                    | Linux run / update                          |
-| `Pix-*-linux-*.deb`                         | Linux manual install (optional convenience) |
-| `latest-linux.yml`                          | Linux update feed                           |
-| `*.blockmap`                                | Differential download maps (when generated) |
-
-CI **fails** if any required feed or mac zip is missing (`scripts/release-assets.mjs`). Blockmaps are kept when present so updates can download only changed ranges.
-
-## CI & Release
-
-| Workflow    | File                            | When                      | What                                                           |
-| ----------- | ------------------------------- | ------------------------- | -------------------------------------------------------------- |
-| **CI**      | `.github/workflows/ci.yml`      | PR + push to `main`       | Ubuntu: install → lint/types/format → tests → build            |
-| **Release** | `.github/workflows/release.yml` | push `v*` tag (or manual) | multi-platform installers + updater feeds → **GitHub Release** |
-
-### Versioning
-
-Product version lives only in `apps/desktop/package.json` (what electron-builder ships).
-Root and `packages/*` stay at `0.0.0` — they are private workspace packages.
-
-```bash
-pnpm version:set 0.1.0
-```
-
-### Cut a release
-
-```bash
-pnpm version:set 0.1.0
-git add apps/desktop/package.json
-git commit -m "chore: release v0.1.0"
-git tag v0.1.0
-git push origin main --tags
-```
-
-Tag must match desktop version (`v` + semver). That builds unsigned installers plus the three electron-updater feeds (`latest.yml` / `latest-mac.yml` / `latest-linux.yml`) and mac zip archives, then attaches them to the GitHub Release. Packaged apps check GitHub Releases once on launch (sidebar shows download / restart when an update is ready). Manual **workflow_dispatch** only uploads Actions artifacts (no Release). Daily CI is Ubuntu-only for lint/types/tests/build; multi-OS packaging stays on Release. Packaging sets `CSC_IDENTITY_AUTO_DISCOVERY=false` (unsigned).
-
-> **macOS note:** first open of an unsigned download may need `xattr -cr /Applications/Pix.app` (Gatekeeper quarantine). Auto-update does **not** require an Apple Developer ID — Pix verifies the release zip (`sha512` via electron-updater) and replaces the `.app` itself (same model as Tauri updater + minisign). Optional `CSC_LINK` / `CSC_KEY_PASSWORD` still improve Gatekeeper UX and notifications when present.
+Pix is a desktop shell for the [pi](https://pi.dev) coding agent. The desktop app now uses **Tauri 2 + a bundled Node Agent Sidecar**, with the existing React interface and pi business logic.
 
 ## Architecture
 
 ```text
-React Renderer → Preload → Electron Main → utilityProcess Agent Host → pi SDK
+React / existing window.pix API
+  → Tauri IPC (Rust window, dialogs, notifications, clipboard, updater)
+  → supervised Node Sidecar (versioned JSON messages over stdin/stdout)
+  → Node Agent Host processes (standard child_process IPC)
+  → @earendil-works/pi-coding-agent SDK
 ```
 
-- Renderer has no Node.js access.
-- Main supervises the Agent Host but does not execute pi tools or extensions.
-- Agent Host uses the public `@earendil-works/pi-coding-agent` SDK.
-- Electron `userData` is only for desktop chrome prefs — never a second agent config layer.
-- A fresh pi home receives no Pix packages, resources, or custom settings.
-- `utilityProcess` provides crash isolation, not a security sandbox.
-- Extension portable UI (select/confirm/status/widgets/…) and TUI-only degraded surface: see [`packages/agent-runtime/EXTENSION_UI.md`](./packages/agent-runtime/EXTENSION_UI.md).
+The renderer has no Node access. The sidecar owns workspace/Git/worktree operations, desktop preferences, themes, SDK selection, managed runtimes and PTYs. Each foreground or parked agent keeps its own Node process; switching conversations preserves background generation. The Rust shell starts the sidecar, forwards requests/events, rejects pending requests on failure, and stops it on application exit. No local HTTP server is used for production IPC.
+
+pi configuration, models, credentials, packages, extensions, tools and sessions continue to use `~/.pi/agent` / `PI_CODING_AGENT_DIR`. Pix does not add a second agent configuration layer. Extensions and tools have the same local access as the pi CLI; process isolation is not a sandbox.
+
+## Requirements
+
+- Node.js **24+** and pnpm **11.15.1** for development/builds.
+- Current stable Rust and the [Tauri platform prerequisites](https://v2.tauri.app/start/prerequisites/).
+- macOS: Xcode Command Line Tools. Linux: WebKitGTK 4.1 development libraries. Windows: Microsoft C++ build tools and WebView2.
+- Installed desktop apps include Node and their production dependencies; users do not need a system Node installation.
+
+## Develop
+
+```sh
+pnpm install
+pnpm dev                 # same as pnpm dev:desktop
+```
+
+The launcher builds the frontend/sidecar/agent, stages the platform Node binary, starts Vite on `127.0.0.1:1420`, and opens Tauri. If that port is occupied, it selects the next available port and passes the same URL to Tauri. The launcher owns Vite directly and closes it along with the Tauri process tree on exit. Frontend changes use Vite HMR. Restart `pnpm dev` after Node business code changes.
+
+Normal launch shares the CLI's real pi home and restores the last workspace. For an isolated test app with temporary configuration and a local fake model:
+
+```sh
+PIX_ISOLATED=1 pnpm dev
+```
+
+Other entry points:
+
+| Task                            | Command                     |
+| ------------------------------- | --------------------------- |
+| Compile frontend + Node sidecar | `pnpm build:desktop`        |
+| Build all workspace packages    | `pnpm build`                |
+| Landing site development        | `pnpm dev:landing`          |
+| Landing site build              | `pnpm build:landing`        |
+| Browser chat-content preview    | `pnpm demo:session-content` |
+| Check Rust shell                | `pnpm check:rust`           |
+
+## Validate
+
+```sh
+pnpm check                         # lint, types, formatting
+pnpm test                          # existing workspace business tests
+pnpm build:desktop
+pnpm --filter @pix/desktop exec node scripts/sidecar-smoke.test.mjs
+pnpm check:rust
+pnpm test:release-assets
+pnpm --filter @pix/desktop exec playwright install chromium webkit
+pnpm e2e
+```
+
+The Sidecar integration test runs the real SDK against an isolated local fake model. It checks request errors, streaming, sessions, settings, workspace/Git queries, abort, process crash recovery and graceful shutdown.
+
+The migrated Playwright suite runs the existing interface against the real Node sidecar. Native dialogs, notifications and window state use explicit test doubles in that suite; test the installed app for native platform behavior. WebKit coverage can be selected with `PIX_TEST_BROWSER=webkit pnpm e2e`.
+
+## Package
+
+```sh
+pnpm package
+```
+
+This compiles the app, stages a platform-specific Node executable, deploys the production-only dependency graph from `packages/sidecar-node`, fetches the existing managed Node/Python tool runtimes, and builds Tauri installers. Dependencies are deployed from the lockfile as real directories and executable shims, supporting dynamic pi extensions, WASM and native `node-pty` addons. Staging rejects symlinks because the Tauri resource bundler would omit them.
+
+Output: `apps/desktop/src-tauri/target/release/bundle/`.
+
+Build on each target OS/architecture. Copying an unrelated architecture's Node binary or native modules into a cross-build is rejected. Generated binaries, resources and build directories are ignored by Git.
+
+## Updates and releases
+
+App version lives in `apps/desktop/package.json`; `tauri.conf.json` reads it directly. `pnpm version:set 0.8.0` also updates the Rust package and lockfile. Tag names must match the desktop version.
+
+The release workflow builds macOS arm64/x64, Windows x64 and Linux x64 installers. Signed updates use Tauri's verified `latest.json` feed, replacing Electron YAML/blockmap feeds.
+
+Configure these repository secrets to enable automatic updates:
+
+- `TAURI_SIGNING_PUBLIC_KEY`
+- `TAURI_SIGNING_PRIVATE_KEY`
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (if the private key is encrypted)
+
+The workflow embeds the public key and repository-specific endpoint, generates signed updater artifacts, and combines all platforms into `latest.json`. Incomplete key pairs or partial signed releases fail the release job. Without keys, manual installers are produced and update checking stays disabled. Tauri updater signatures are separate from OS code signing.
+
+For local signed packaging, set `PIX_UPDATER_PUBLIC_KEY`, optionally `PIX_UPDATER_ENDPOINT`, and `TAURI_SIGNING_PRIVATE_KEY`, then enable `bundle.createUpdaterArtifacts` in the Tauri build configuration. Never commit private signing keys.
+
+CI runs checks, business tests, builds, Rust checks, sidecar integration and browser regression. Release jobs build installers; this migration does not publish a release automatically.
+
+## Migration notes
+
+See [MIGRATION.md](MIGRATION.md) for the feature mapping and compatibility details. Portable extension UI remains documented in [EXTENSION_UI.md](packages/agent-runtime/EXTENSION_UI.md).
 
 ## License
 
-See [LICENSE](./LICENSE).
-
-## Community Outreach
-
-[LinuxDo](https://linux.do)
+[MIT](LICENSE).

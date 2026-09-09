@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 
 /**
  * shadcn/ui Switch (new-york).
- * On state uses product interactive accent `--switch-on` (#379cfc).
+ * On state uses product interactive accent `--switch-on` (#3a83f7).
  */
 function Switch({
   className,
@@ -23,7 +23,7 @@ function Switch({
         "focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
         "disabled:cursor-not-allowed disabled:opacity-50",
         "data-[size=default]:h-[1.15rem] data-[size=default]:w-8 data-[size=sm]:h-3.5 data-[size=sm]:w-6",
-        "data-[state=checked]:bg-[var(--switch-on,#379cfc)] data-[state=unchecked]:bg-input",
+        "data-[state=checked]:bg-[var(--switch-on,#3a83f7)] data-[state=unchecked]:bg-input",
         "dark:data-[state=unchecked]:bg-input/80",
         className,
       )}

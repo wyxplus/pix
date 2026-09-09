@@ -936,7 +936,26 @@ export function ThemeSkinStudio(props: ThemeSkinStudioProps) {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file || !editable) return;
-    const path = window.pix.workspace.pathForFile(file);
+    // WebViews do not expose a filesystem path for browser File objects.
+    // Stage validated raster bytes through the same attachment API used by image paste.
+    const extension = (
+      { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" } as Record<string, string>
+    )[file.type];
+    if (!extension || file.size > 12 * 1024 * 1024) {
+      setMessage(tr("appearance.themeSkinError"));
+      return;
+    }
+    let path = window.pix.workspace.pathForFile(file);
+    try {
+      path ||=
+        (await window.pix.workspace.saveClipboardImage({
+          bytes: Array.from(new Uint8Array(await file.arrayBuffer())),
+          ext: extension,
+        })) ?? "";
+    } catch {
+      setMessage(tr("appearance.themeSkinError"));
+      return;
+    }
     if (!path) {
       setMessage(tr("appearance.themeSkinError"));
       return;

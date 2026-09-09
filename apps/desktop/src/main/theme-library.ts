@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, extname, join, resolve } from "node:path";
-import { nativeImage } from "electron";
+import { nativeImage } from "../sidecar/image.ts";
 import type {
   ThemeLibrarySnapshot,
   ThemeSkinConfig,
@@ -740,7 +740,7 @@ export class ThemeLibrary {
           ...(skin.backgroundBuiltinId ? { backgroundBuiltinId: skin.backgroundBuiltinId } : {}),
           ...(this.backgroundPath(skin.id)
             ? {
-                backgroundUrl: `pix-theme://${skin.id}/background?v=${encodeURIComponent(skin.updatedAt)}`,
+                backgroundUrl: `data:image/${extname(this.backgroundPath(skin.id)!).slice(1).replace("jpg", "jpeg")};base64,${readFileSync(this.backgroundPath(skin.id)!).toString("base64")}`,
               }
             : {}),
         })),
