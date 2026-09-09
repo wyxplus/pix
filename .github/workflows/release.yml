@@ -14,7 +14,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
@@ -30,7 +30,9 @@ jobs:
       PIX_UPDATER_ENDPOINT: https://github.com/${{ github.repository }}/releases/latest/download/latest.json
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      # An unset secret expands to an empty identity, which makes codesign fail.
+      # Use Tauri's ad-hoc identity when no Apple identity is configured.
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6

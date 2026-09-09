@@ -84,6 +84,8 @@ App version lives in `apps/desktop/package.json`; `tauri.conf.json` reads it dir
 
 The release workflow builds macOS arm64/x64, Windows x64 and Linux x64 installers. Signed updates use Tauri's verified `latest.json` feed, replacing Electron YAML/blockmap feeds.
 
+Platform builds run independently so a failure on one OS does not cancel the others. When `APPLE_SIGNING_IDENTITY` is unset, macOS packaging uses an ad-hoc signature (`-`); this does not provide Apple notarization.
+
 Configure these repository secrets to enable automatic updates:
 
 - `TAURI_SIGNING_PUBLIC_KEY`
