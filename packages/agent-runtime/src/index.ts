@@ -60,6 +60,7 @@ import {
 } from "./models-json.ts";
 import { listProviderUsage } from "./provider-usage.ts";
 import { resolvePixSessionDir } from "./session-dir.ts";
+import { createPlatformSettingsManager } from "./platform-tools.ts";
 import {
   availableServiceTiersForModel,
   installServiceTierPayloadHook,
@@ -225,8 +226,9 @@ export interface CreatePixRuntimeOptions {
     id: string;
   };
   /**
-   * Optional tool allow-list. When omitted, uses pi CLI defaults
-   * (`read`, `bash`, `edit`, `write`, plus extensions/settings).
+   * Optional tool allow-list. When omitted, uses configured/platform defaults
+   * (PowerShell and filesystem tools on Windows; pi CLI defaults elsewhere).
+   * User defaultTools and extension tools remain supported.
    * Smoke/e2e may pass a restricted list (e.g. `["read"]`).
    */
   tools?: string[];
@@ -1551,7 +1553,7 @@ export async function createPixRuntime(
     sessionManager,
     sessionStartEvent,
   }) => {
-    const settingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted });
+    const settingsManager = createPlatformSettingsManager(cwd, agentDir, { projectTrusted });
     // Fix bare-host vs trailing-/v1 mistakes before pi loads models.json.
     await normalizeModelsJsonBaseUrls(agentDir);
     const services = await createAgentSessionServices({
@@ -1581,8 +1583,8 @@ export async function createPixRuntime(
       }
       sessionOptions.model = resolveModelWithCatalogThinking(model, services) ?? model;
     }
-    // Product = visual pi: omit tools/noTools so SDK uses CLI defaults
-    // (read/bash/edit/write + settings exclusions). Only pass restrictions when asked.
+    // Let the SDK use configured/platform defaults and keep extension tools enabled.
+    // Only pass a tool allowlist or suppression mode when explicitly requested.
     if (options.tools) sessionOptions.tools = options.tools;
     else if (options.noTools) sessionOptions.noTools = options.noTools;
     if (sessionStartEvent) sessionOptions.sessionStartEvent = sessionStartEvent;
@@ -2354,6 +2356,7 @@ const KNOWN_PI_SETTING_KEYS = [
   "terminal",
   "images",
   "enabledModels",
+  "defaultTools",
   "doubleEscapeAction",
   "treeFilterMode",
   "thinkingBudgets",

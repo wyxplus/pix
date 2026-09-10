@@ -5,7 +5,7 @@ packages:
 catalogMode: prefer
 
 catalog:
-  "@earendil-works/pi-coding-agent": 0.84.1
+  "@earendil-works/pi-coding-agent": 0.85.1
   "@silvia-odwyer/photon-node": 0.3.4
   "@types/node": 26.1.1
   "@types/react": 19.2.17
@@ -50,13 +50,14 @@ peerDependencyRules:
     vite: "*"
 
 minimumReleaseAgeExclude:
-  - "@earendil-works/pi-agent-core@0.84.1"
-  - "@earendil-works/pi-ai@0.84.1"
-  - "@earendil-works/pi-coding-agent@0.84.1"
-  - "@earendil-works/pi-tui@0.84.1"
+  - "@earendil-works/pi-agent-core@0.85.1"
+  - "@earendil-works/pi-ai@0.85.1"
+  - "@earendil-works/pi-coding-agent@0.85.1"
+  - "@earendil-works/pi-tui@0.85.1"
 
 allowBuilds:
   "@google/genai": false
   "@tailwindcss/oxide": true
+  esbuild: true
   node-pty: true
   protobufjs: false

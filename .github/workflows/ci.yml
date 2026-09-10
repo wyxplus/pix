@@ -7,6 +7,21 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 jobs:
+  windows-powershell:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.15.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Verify PowerShell execution and platform tool lifecycle
+        run: pnpm --filter @pix/agent-runtime exec vp test --run test/platform-tools.test.ts
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 30
