@@ -1,0 +1,40 @@
+name: Windows installed app smoke
+on:
+  workflow_dispatch:
+    inputs:
+      release_run_id:
+        description: Release workflow run containing the Windows installer to test
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+jobs:
+  smoke:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Download released Windows installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_RUN_ID: ${{ inputs.release_run_id }}
+        run: gh run download $env:RELEASE_RUN_ID --repo $env:GITHUB_REPOSITORY --name pix-x86_64-pc-windows-msvc --dir installer
+      - name: Install and exercise the bundled Sidecar
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem installer -Filter '*-setup.exe' | Select-Object -First 1
+          if (!$installer) { throw 'Windows NSIS installer missing from release' }
+          $installDir = Join-Path $env:RUNNER_TEMP 'Pix Installed Smoke'
+          $install = Start-Process -FilePath $installer.FullName -ArgumentList "/S /D=$installDir" -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "Installer exited with code $($install.ExitCode)" }
+          $env:PIX_SMOKE_NODE = Join-Path $installDir 'pix-node.exe'
+          $env:PIX_SMOKE_ROOT = Join-Path $installDir 'sidecar'
+          $env:PIX_RESOURCES_DIR = $installDir
+          $env:PIX_PACKAGED = '1'
+          $env:PIX_SIDECAR_DEBUG = '1'
+          if (!(Test-Path $env:PIX_SMOKE_NODE)) { throw 'Bundled Node executable missing after installation' }
+          node apps/desktop/scripts/sidecar-smoke.test.mjs

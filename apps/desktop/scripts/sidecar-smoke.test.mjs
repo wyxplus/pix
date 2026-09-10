@@ -24,7 +24,7 @@ await test(
       await client.ready;
       const runtime = await client.invoke("pix:app:get-runtime");
       assert.match(runtime.appVersion, /^\d+\.\d+\.\d+/);
-      assert.equal(runtime.isPackaged, false);
+      assert.equal(runtime.isPackaged, process.env.PIX_PACKAGED === "1");
       const sdk = await client.invoke("pix:pi-sdk:get-status");
       assert.ok(
         sdk.candidates.some((candidate) => candidate.source === "builtin" && candidate.available),
@@ -36,6 +36,14 @@ await test(
       assert.ok(snapshot.runtimeId);
       await client.invoke("pix:trust:set", true);
       assert.ok(await client.invoke("pix:models:list"));
+      const [models, modelConfig, settings] = await Promise.all([
+        client.invoke("pix:models:refresh-catalog"),
+        client.invoke("pix:models:get-config"),
+        client.invoke("pix:settings:get"),
+      ]);
+      assert.ok(models.some((model) => model.provider === "pix-fake" && model.id === "pix-fake"));
+      assert.ok(modelConfig);
+      assert.ok(settings);
       await client.invoke("pix:models:set", "pix-fake", "pix-fake");
       await client.invoke("pix:agent:prompt", "Read fixture.txt and explain the result.");
       assert.ok(
