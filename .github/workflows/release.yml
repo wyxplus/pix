@@ -67,6 +67,12 @@ jobs:
           else
             pnpm --filter @pix/desktop exec tauri build
           fi
+      - name: Test Windows Sidecar launch paths
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:PIX_SMOKE_NODE = (Resolve-Path 'apps/desktop/src-tauri/binaries/pix-node.exe').Path
+          cargo test --release --locked --manifest-path apps/desktop/src-tauri/Cargo.toml sidecar::tests
       - name: Collect Tauri assets
         run: node scripts/release-assets.mjs collect apps/desktop/src-tauri/target/release/bundle artifacts --target ${{ matrix.target }}
       - uses: actions/upload-artifact@v4

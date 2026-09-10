@@ -47,4 +47,22 @@ jobs:
         shell: pwsh
         run: |
           $env:PIX_NATIVE_EXECUTABLE = Join-Path $env:RUNNER_TEMP 'Pix Installed Smoke/pix-desktop.exe'
-          node apps/desktop/scripts/windows-native-smoke.test.mjs
+          # Hosted Windows runners are elevated; current WebView2 ignores env
+          # debugger overrides there. Scope the policy to this app on this VM.
+          $policy = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge\WebView2'
+          $overrides = @{
+            AdditionalBrowserArguments = '--remote-debugging-port=9222 --remote-debugging-address=127.0.0.1'
+            UserDataFolder = (Join-Path $env:RUNNER_TEMP 'pix-smoke-webview')
+          }
+          try {
+            foreach ($key in $overrides.Keys) {
+              New-Item -Path "$policy\$key" -Force | Out-Null
+              New-ItemProperty -Path "$policy\$key" -Name 'pix-desktop.exe' -Value $overrides[$key] -PropertyType String -Force | Out-Null
+            }
+            node apps/desktop/scripts/windows-native-smoke.test.mjs
+            if ($LASTEXITCODE -ne 0) { throw 'Installed native window smoke test failed' }
+          } finally {
+            foreach ($key in $overrides.Keys) {
+              Remove-ItemProperty -Path "$policy\$key" -Name 'pix-desktop.exe' -ErrorAction SilentlyContinue
+            }
+          }

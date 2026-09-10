@@ -54,7 +54,7 @@ await test(
       const context = browser.contexts()[0];
       const page = context.pages()[0] || (await context.waitForEvent("page", { timeout: 30_000 }));
       page.on("pageerror", (error) => console.error("WebView error:", error.message));
-      await page.waitForFunction(() => Boolean(window.pix), { timeout: 30_000 });
+      await page.waitForFunction(() => Boolean(window.pix), undefined, { timeout: 30_000 });
       const runtime = await page.evaluate(() => window.pix.app.getRuntime());
       assert.equal(runtime.platform, "win32");
       assert.equal(runtime.isPackaged, true);
@@ -76,7 +76,6 @@ await test(
       console.error("Native application output:\n", stderr);
       throw error;
     } finally {
-      await browser?.close().catch(() => {});
       if (child.pid && child.exitCode === null) {
         try {
           execFileSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore" });
@@ -84,7 +83,12 @@ await test(
           /* The app may already have exited. */
         }
       }
-      await prepared.cleanup();
+      await browser?.close().catch(() => {});
+      await prepared.cleanup().catch((error) => {
+        // WebView2 can retain its lock briefly after taskkill; do not hide the
+        // actual test failure behind cleanup of a disposable temporary folder.
+        console.warn("Could not remove temporary smoke profile:", error.message);
+      });
     }
   },
 );

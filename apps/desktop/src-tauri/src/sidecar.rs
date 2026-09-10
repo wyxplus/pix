@@ -2,7 +2,7 @@ use serde_json::{json, Value};
 use std::{
     collections::HashMap,
     io::{BufRead, BufReader, Read, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Child, ChildStdin, Command, Stdio},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -79,35 +79,18 @@ impl Sidecar {
             Some(path) => PathBuf::from(path),
             None => app.path().document_dir()?,
         };
-        let mut command = Command::new(binary);
-        command
-            .arg(root.join("dist/sidecar/sidecar.mjs"))
-            .current_dir(&root)
-            .env("PIX_APP_ROOT", &root)
-            .env(
-                "PIX_RESOURCES_DIR",
-                if cfg!(debug_assertions) {
-                    root.clone()
-                } else {
-                    resources
-                },
-            )
-            .env("PIX_DATA_DIR", &data)
-            .env("PIX_DOCUMENTS_DIR", documents)
-            .env(
-                "PIX_PACKAGED",
-                if cfg!(debug_assertions) { "0" } else { "1" },
-            )
-            .env_remove("NODE_OPTIONS")
-            .env_remove("NODE_PATH")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            command.creation_flags(0x08000000);
-        }
+        let mut command = node_command(
+            &binary,
+            &root,
+            if cfg!(debug_assertions) {
+                &root
+            } else {
+                &resources
+            },
+            &data,
+            &documents,
+            !cfg!(debug_assertions),
+        );
         let mut child = command.spawn()?;
         let inner = Arc::new(Inner {
             stdin: Mutex::new(child.stdin.take().ok_or("Missing stdin")?),
@@ -251,5 +234,78 @@ impl Sidecar {
             let _ = child.kill();
             let _ = child.wait();
         }
+    }
+}
+
+fn node_command(
+    binary: &Path,
+    root: &Path,
+    resources: &Path,
+    data: &Path,
+    documents: &Path,
+    packaged: bool,
+) -> Command {
+    // Tauri canonicalizes Windows resource paths to \\?\C:\... . Node's main
+    // module resolver fails on that form (EISDIR, lstat 'C:'). Simplify paths
+    // at the process boundary, including paths the agent inherits through env.
+    let root = dunce::simplified(root);
+    let mut command = Command::new(dunce::simplified(binary));
+    command
+        .arg(root.join("dist").join("sidecar").join("sidecar.mjs"))
+        .current_dir(root)
+        .env("PIX_APP_ROOT", root)
+        .env("PIX_RESOURCES_DIR", dunce::simplified(resources))
+        .env("PIX_DATA_DIR", dunce::simplified(data))
+        .env("PIX_DOCUMENTS_DIR", dunce::simplified(documents))
+        .env("PIX_PACKAGED", if packaged { "1" } else { "0" })
+        .env_remove("NODE_OPTIONS")
+        .env_remove("NODE_PATH")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    command
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn starts_node_from_windows_canonical_paths() {
+        let binary = PathBuf::from(std::env::var_os("PIX_SMOKE_NODE").expect("Set PIX_SMOKE_NODE"))
+            .canonicalize()
+            .unwrap();
+        let fixture = std::env::temp_dir().join(format!("Pix 路径 test {}", std::process::id()));
+        std::fs::create_dir_all(fixture.join("dist/sidecar")).unwrap();
+        std::fs::write(
+            fixture.join("dist/sidecar/sidecar.mjs"),
+            r#"
+                import assert from 'node:assert/strict';
+                import { readFileSync } from 'node:fs';
+                assert.ok(readFileSync(new URL(import.meta.url)).length > 0);
+                for (const key of ['PIX_APP_ROOT', 'PIX_RESOURCES_DIR', 'PIX_DATA_DIR', 'PIX_DOCUMENTS_DIR']) {
+                    assert.ok(!process.env[key].startsWith('\\\\?\\'), key);
+                }
+                assert.equal(process.env.PIX_PACKAGED, '1');
+                console.log('ready');
+            "#,
+        )
+        .unwrap();
+        let root = fixture.canonicalize().unwrap();
+        assert!(root.to_string_lossy().starts_with(r"\\?\"));
+        let result = node_command(&binary, &root, &root, &root, &root, true).output();
+        std::fs::remove_dir_all(&fixture).unwrap();
+        let output = result.unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "ready");
     }
 }
