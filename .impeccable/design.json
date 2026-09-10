@@ -1,0 +1,602 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-10T01:11:46.054865+00:00",
+  "title": "Design System: Pix Desktop",
+  "extensions": {
+    "colorMeta": {
+      "interactive-accent": {
+        "role": "primary",
+        "displayName": "interactive-accent",
+        "canonical": "#3A83F7",
+        "tonalRamp": [
+          "#090059",
+          "#000079",
+          "#002A99",
+          "#004BBB",
+          "#216BDD",
+          "#428BFF",
+          "#70BCFF",
+          "#A0EEFF"
+        ]
+      },
+      "light-canvas": {
+        "role": "neutral",
+        "displayName": "light-canvas",
+        "canonical": "#FFFFFF",
+        "tonalRamp": [
+          "#0B0B0B",
+          "#222222",
+          "#3A3A3A",
+          "#555555",
+          "#717171",
+          "#8F8F8F",
+          "#BEBEBE",
+          "#EEEEEE"
+        ]
+      },
+      "dark-canvas": {
+        "role": "neutral",
+        "displayName": "dark-canvas",
+        "canonical": "#212121",
+        "tonalRamp": [
+          "#0B0B0B",
+          "#222222",
+          "#3A3A3A",
+          "#555555",
+          "#717171",
+          "#8F8F8F",
+          "#BEBEBE",
+          "#EEEEEE"
+        ]
+      },
+      "light-panel": {
+        "role": "neutral",
+        "displayName": "light-panel",
+        "canonical": "#FFFFFF",
+        "tonalRamp": [
+          "#0B0B0B",
+          "#222222",
+          "#3A3A3A",
+          "#555555",
+          "#717171",
+          "#8F8F8F",
+          "#BEBEBE",
+          "#EEEEEE"
+        ]
+      },
+      "dark-panel": {
+        "role": "neutral",
+        "displayName": "dark-panel",
+        "canonical": "#181818",
+        "tonalRamp": [
+          "#0B0B0B",
+          "#222222",
+          "#3A3A3A",
+          "#555555",
+          "#717171",
+          "#8F8F8F",
+          "#BEBEBE",
+          "#EEEEEE"
+        ]
+      },
+      "light-sidebar": {
+        "role": "neutral",
+        "displayName": "light-sidebar",
+        "canonical": "#F9F9F9",
+        "tonalRamp": [
+          "#0B0B0B",
+          "#222222",
+          "#3A3A3A",
+          "#555555",
+          "#717171",
+          "#8F8F8F",
+          "#BEBEBE",
+          "#EEEEEE"
+        ]
+      },
+      "dark-sidebar": {
+        "role": "neutral",
+        "displayName": "dark-sidebar",
+        "canonical": "#000000",
+        "tonalRamp": [
+          "#0B0B0B",
+          "#222222",
+          "#3A3A3A",
+          "#555555",
+          "#717171",
+          "#8F8F8F",
+          "#BEBEBE",
+          "#EEEEEE"
+        ]
+      },
+      "light-foreground": {
+        "role": "neutral",
+        "displayName": "light-foreground",
+        "canonical": "#1A1C1F",
+        "tonalRamp": [
+          "#090B0E",
+          "#202225",
+          "#383B3E",
+          "#535559",
+          "#6F7275",
+          "#8D8F93",
+          "#BBBEC2",
+          "#ECEFF3"
+        ]
+      },
+      "dark-foreground": {
+        "role": "neutral",
+        "displayName": "dark-foreground",
+        "canonical": "#DFDFDF",
+        "tonalRamp": [
+          "#0B0B0B",
+          "#222222",
+          "#3A3A3A",
+          "#555555",
+          "#717171",
+          "#8F8F8F",
+          "#BEBEBE",
+          "#EEEEEE"
+        ]
+      },
+      "light-secondary": {
+        "role": "neutral",
+        "displayName": "light-secondary",
+        "canonical": "rgb(26 28 31 / 0.7)",
+        "tonalRamp": [
+          "#090B0EB2",
+          "#202225B2",
+          "#383B3EB2",
+          "#535559B2",
+          "#6F7275B2",
+          "#8D8F93B2",
+          "#BBBEC2B2",
+          "#ECEFF3B2"
+        ]
+      },
+      "dark-secondary": {
+        "role": "neutral",
+        "displayName": "dark-secondary",
+        "canonical": "rgb(255 255 255 / 0.7)",
+        "tonalRamp": [
+          "#0B0B0BB2",
+          "#222222B2",
+          "#3A3A3AB2",
+          "#555555B2",
+          "#717171B2",
+          "#8F8F8FB2",
+          "#BEBEBEB2",
+          "#EEEEEEB2"
+        ]
+      },
+      "light-tertiary": {
+        "role": "neutral",
+        "displayName": "light-tertiary",
+        "canonical": "rgb(26 28 31 / 0.5)",
+        "tonalRamp": [
+          "#090B0E80",
+          "#20222580",
+          "#383B3E80",
+          "#53555980",
+          "#6F727580",
+          "#8D8F9380",
+          "#BBBEC280",
+          "#ECEFF380"
+        ]
+      },
+      "dark-tertiary": {
+        "role": "neutral",
+        "displayName": "dark-tertiary",
+        "canonical": "rgb(255 255 255 / 0.5)",
+        "tonalRamp": [
+          "#0B0B0B80",
+          "#22222280",
+          "#3A3A3A80",
+          "#55555580",
+          "#71717180",
+          "#8F8F8F80",
+          "#BEBEBE80",
+          "#EEEEEE80"
+        ]
+      },
+      "light-hover": {
+        "role": "neutral",
+        "displayName": "light-hover",
+        "canonical": "rgb(26 28 31 / 0.05)",
+        "tonalRamp": [
+          "#090B0E0D",
+          "#2022250D",
+          "#383B3E0D",
+          "#5355590D",
+          "#6F72750D",
+          "#8D8F930D",
+          "#BBBEC20D",
+          "#ECEFF30D"
+        ]
+      },
+      "dark-hover": {
+        "role": "neutral",
+        "displayName": "dark-hover",
+        "canonical": "rgb(255 255 255 / 0.08)",
+        "tonalRamp": [
+          "#0B0B0B14",
+          "#22222214",
+          "#3A3A3A14",
+          "#55555514",
+          "#71717114",
+          "#8F8F8F14",
+          "#BEBEBE14",
+          "#EEEEEE14"
+        ]
+      },
+      "light-border": {
+        "role": "neutral",
+        "displayName": "light-border",
+        "canonical": "rgb(26 28 31 / 0.08)",
+        "tonalRamp": [
+          "#090B0E14",
+          "#20222514",
+          "#383B3E14",
+          "#53555914",
+          "#6F727514",
+          "#8D8F9314",
+          "#BBBEC214",
+          "#ECEFF314"
+        ]
+      },
+      "dark-border": {
+        "role": "neutral",
+        "displayName": "dark-border",
+        "canonical": "rgb(255 255 255 / 0.08)",
+        "tonalRamp": [
+          "#0B0B0B14",
+          "#22222214",
+          "#3A3A3A14",
+          "#55555514",
+          "#71717114",
+          "#8F8F8F14",
+          "#BEBEBE14",
+          "#EEEEEE14"
+        ]
+      },
+      "light-border-subtle": {
+        "role": "neutral",
+        "displayName": "light-border-subtle",
+        "canonical": "rgb(26 28 31 / 0.05)",
+        "tonalRamp": [
+          "#090B0E0D",
+          "#2022250D",
+          "#383B3E0D",
+          "#5355590D",
+          "#6F72750D",
+          "#8D8F930D",
+          "#BBBEC20D",
+          "#ECEFF30D"
+        ]
+      },
+      "dark-border-subtle": {
+        "role": "neutral",
+        "displayName": "dark-border-subtle",
+        "canonical": "rgb(255 255 255 / 0.04)",
+        "tonalRamp": [
+          "#0B0B0B0A",
+          "#2222220A",
+          "#3A3A3A0A",
+          "#5555550A",
+          "#7171710A",
+          "#8F8F8F0A",
+          "#BEBEBE0A",
+          "#EEEEEE0A"
+        ]
+      },
+      "light-border-strong": {
+        "role": "neutral",
+        "displayName": "light-border-strong",
+        "canonical": "rgb(26 28 31 / 0.12)",
+        "tonalRamp": [
+          "#090B0E1F",
+          "#2022251F",
+          "#383B3E1F",
+          "#5355591F",
+          "#6F72751F",
+          "#8D8F931F",
+          "#BBBEC21F",
+          "#ECEFF31F"
+        ]
+      },
+      "dark-border-strong": {
+        "role": "neutral",
+        "displayName": "dark-border-strong",
+        "canonical": "rgb(255 255 255 / 0.16)",
+        "tonalRamp": [
+          "#0B0B0B29",
+          "#22222229",
+          "#3A3A3A29",
+          "#55555529",
+          "#71717129",
+          "#8F8F8F29",
+          "#BEBEBE29",
+          "#EEEEEE29"
+        ]
+      },
+      "light-user-bubble": {
+        "role": "neutral",
+        "displayName": "light-user-bubble",
+        "canonical": "#F5F5F5",
+        "tonalRamp": [
+          "#0B0B0B",
+          "#222222",
+          "#3A3A3A",
+          "#555555",
+          "#717171",
+          "#8F8F8F",
+          "#BEBEBE",
+          "#EEEEEE"
+        ]
+      },
+      "dark-user-bubble": {
+        "role": "neutral",
+        "displayName": "dark-user-bubble",
+        "canonical": "#2F2F2F",
+        "tonalRamp": [
+          "#0B0B0B",
+          "#222222",
+          "#3A3A3A",
+          "#555555",
+          "#717171",
+          "#8F8F8F",
+          "#BEBEBE",
+          "#EEEEEE"
+        ]
+      },
+      "light-maximum": {
+        "role": "tertiary",
+        "displayName": "light-maximum",
+        "canonical": "#924FF7",
+        "tonalRamp": [
+          "#240060",
+          "#380081",
+          "#4F00A2",
+          "#690EC4",
+          "#853EE7",
+          "#A262FF",
+          "#D094FF",
+          "#FFC6FF"
+        ]
+      },
+      "dark-maximum": {
+        "role": "tertiary",
+        "displayName": "dark-maximum",
+        "canonical": "#AD7BF9",
+        "tonalRamp": [
+          "#1D004A",
+          "#340069",
+          "#4C0588",
+          "#6730A9",
+          "#8450CA",
+          "#A26FEC",
+          "#D19FFF",
+          "#FFD0FF"
+        ]
+      },
+      "slider-thumb": {
+        "role": "neutral",
+        "displayName": "slider-thumb",
+        "canonical": "#FFFFFF",
+        "tonalRamp": [
+          "#0B0B0B",
+          "#222222",
+          "#3A3A3A",
+          "#555555",
+          "#717171",
+          "#8F8F8F",
+          "#BEBEBE",
+          "#EEEEEE"
+        ]
+      },
+      "modal-overlay": {
+        "role": "neutral",
+        "displayName": "modal-overlay",
+        "canonical": "rgb(0 0 0 / 0.32)",
+        "tonalRamp": [
+          "#0B0B0B52",
+          "#22222252",
+          "#3A3A3A52",
+          "#55555552",
+          "#71717152",
+          "#8F8F8F52",
+          "#BEBEBE52",
+          "#EEEEEE52"
+        ]
+      }
+    },
+    "shadows": [
+      {
+        "name": "menu",
+        "value": "0 0 0 0.5px var(--border), 0 0 0 0.5px var(--border), 0 8px 16px -4px rgb(0 0 0 / 0.12)",
+        "purpose": "普通菜单的细边缘与浮起层次。"
+      },
+      {
+        "name": "composer-light",
+        "value": "0 0 0 1px #0000000a, 0 2px 8px 0 #0000000a, 0 4px 80px 8px #00000006",
+        "purpose": "浅色默认多行输入框。"
+      },
+      {
+        "name": "composer-dark",
+        "value": "inset 0 0 1px 0 rgb(255 255 255 / 0.2)",
+        "purpose": "深色默认多行输入框。"
+      }
+    ],
+    "motion": [
+      {
+        "name": "control",
+        "value": "150ms",
+        "purpose": "常规控件颜色过渡。"
+      },
+      {
+        "name": "alert",
+        "value": "150ms ease-out",
+        "purpose": "确认删除淡入淡出，仅 opacity。"
+      },
+      {
+        "name": "sidebar",
+        "value": "360ms cubic-bezier(0.3, 1.2, 0.4, 1)",
+        "purpose": "侧栏折叠。"
+      },
+      {
+        "name": "slider-position",
+        "value": "300ms cubic-bezier(0.23, 1, 0.32, 1)",
+        "purpose": "滑轨填充与滑块位置；按下时 150ms。"
+      },
+      {
+        "name": "slider-hover",
+        "value": "300ms cubic-bezier(0.34, 1.56, 0.64, 1)",
+        "purpose": "滑块悬停缩放，非真实弹簧物理。"
+      },
+      {
+        "name": "reduced-motion",
+        "value": "0.01ms / none",
+        "purpose": "全局近乎即时，滑杆取消过渡。"
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "composer-shadow-compact-max",
+        "value": "639px"
+      },
+      {
+        "name": "sidebar-collapse-below",
+        "value": "832px"
+      },
+      {
+        "name": "sidebar-reopen-at",
+        "value": "864px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "主按钮",
+      "kind": "button",
+      "description": "实际按钮变体的样式示例；行为使用项目原组件。",
+      "html": "<button class=\"ds-button-primary\">主按钮</button>",
+      "css": ".ds-button-primary{font-family:var(--font-sans,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif);font-size:var(--text-sm,13px);height:36px;padding:8px 16px;border-radius:var(--radius-lg,10px);font-weight:500;cursor:pointer;transition:background-color 150ms;border:0;background:var(--primary,#1A1C1F);color:var(--primary-foreground,#FAFAFA);}.ds-button-primary:hover{background:color-mix(in srgb,var(--primary,#1A1C1F) 90%,transparent);}.ds-button-primary:focus-visible{outline:2px solid var(--ring,#3A83F7);outline-offset:2px;}.ds-button-primary:disabled{opacity:.5;pointer-events:none;}@media(prefers-reduced-motion:reduce){.ds-button-primary{transition:none;}}",
+      "refersTo": "button-primary"
+    },
+    {
+      "name": "描边按钮",
+      "kind": "button",
+      "description": "实际按钮变体的样式示例；行为使用项目原组件。",
+      "html": "<button class=\"ds-button-outline\">描边按钮</button>",
+      "css": ".ds-button-outline{font-family:var(--font-sans,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif);font-size:var(--text-sm,13px);height:36px;padding:8px 16px;border-radius:var(--radius-lg,10px);font-weight:500;cursor:pointer;transition:background-color 150ms;border:1px solid var(--border,rgb(26 28 31 / .08));background:transparent;color:var(--foreground,#1A1C1F);}.ds-button-outline:hover{background:var(--hover-fill,rgb(26 28 31 / .05));}.ds-button-outline:focus-visible{outline:2px solid var(--ring,#3A83F7);outline-offset:2px;}.ds-button-outline:disabled{opacity:.5;pointer-events:none;}@media(prefers-reduced-motion:reduce){.ds-button-outline{transition:none;}}",
+      "refersTo": "button-outline"
+    },
+    {
+      "name": "轻量按钮",
+      "kind": "button",
+      "description": "实际按钮变体的样式示例；行为使用项目原组件。",
+      "html": "<button class=\"ds-button-ghost\">轻量按钮</button>",
+      "css": ".ds-button-ghost{font-family:var(--font-sans,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif);font-size:var(--text-sm,13px);height:36px;padding:8px 16px;border-radius:var(--radius-lg,10px);font-weight:500;cursor:pointer;transition:background-color 150ms;border:0;background:transparent;color:var(--foreground,#1A1C1F);}.ds-button-ghost:hover{background:var(--hover-fill,rgb(26 28 31 / .05));}.ds-button-ghost:focus-visible{outline:2px solid var(--ring,#3A83F7);outline-offset:2px;}.ds-button-ghost:disabled{opacity:.5;pointer-events:none;}@media(prefers-reduced-motion:reduce){.ds-button-ghost{transition:none;}}",
+      "refersTo": "button-ghost"
+    },
+    {
+      "name": "次级按钮",
+      "kind": "button",
+      "description": "实际按钮变体的样式示例；行为使用项目原组件。",
+      "html": "<button class=\"ds-button-secondary\">次级按钮</button>",
+      "css": ".ds-button-secondary{font-family:var(--font-sans,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif);font-size:var(--text-sm,13px);height:36px;padding:8px 16px;border-radius:var(--radius-lg,10px);font-weight:500;cursor:pointer;transition:background-color 150ms;border:0;background:var(--secondary,rgb(26 28 31 / .05));color:var(--secondary-foreground,#1A1C1F);}.ds-button-secondary:hover{background:color-mix(in srgb,var(--secondary,rgb(26 28 31 / .05)) 80%,transparent);}.ds-button-secondary:focus-visible{outline:2px solid var(--ring,#3A83F7);outline-offset:2px;}.ds-button-secondary:disabled{opacity:.5;pointer-events:none;}@media(prefers-reduced-motion:reduce){.ds-button-secondary{transition:none;}}"
+    },
+    {
+      "name": "危险操作按钮",
+      "kind": "button",
+      "description": "实际按钮变体的样式示例；行为使用项目原组件。",
+      "html": "<button class=\"ds-button-destructive\">危险操作按钮</button>",
+      "css": ".ds-button-destructive{font-family:var(--font-sans,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif);font-size:var(--text-sm,13px);height:36px;padding:8px 16px;border-radius:var(--radius-lg,10px);font-weight:500;cursor:pointer;transition:background-color 150ms;border:0;background:var(--destructive,#DC2626);color:white;}.ds-button-destructive:hover{background:color-mix(in srgb,var(--destructive,#DC2626) 90%,transparent);}.ds-button-destructive:focus-visible{outline:2px solid var(--ring,#3A83F7);outline-offset:2px;}.ds-button-destructive:disabled{opacity:.5;pointer-events:none;}@media(prefers-reduced-motion:reduce){.ds-button-destructive{transition:none;}}"
+    },
+    {
+      "name": "链接按钮",
+      "kind": "button",
+      "description": "实际按钮变体的样式示例；行为使用项目原组件。",
+      "html": "<button class=\"ds-button-link\">链接按钮</button>",
+      "css": ".ds-button-link{font-family:var(--font-sans,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif);font-size:var(--text-sm,13px);height:36px;padding:8px 16px;border-radius:var(--radius-lg,10px);font-weight:500;cursor:pointer;transition:background-color 150ms;border:0;background:transparent;color:var(--link,#3A83F7);}.ds-button-link:hover{text-decoration:underline;text-underline-offset:4px;}.ds-button-link:focus-visible{outline:2px solid var(--ring,#3A83F7);outline-offset:2px;}.ds-button-link:disabled{opacity:.5;pointer-events:none;}@media(prefers-reduced-motion:reduce){.ds-button-link{transition:none;}}"
+    },
+    {
+      "name": "输入字段",
+      "kind": "input",
+      "description": "透明字段，桌面小字号与蓝色焦点。",
+      "html": "<input class=\"ds-input\" aria-label=\"自定义名称\" placeholder=\"输入自定义名称…\"/>",
+      "css": ".ds-input{font-family:var(--font-sans,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif);font-size:var(--text-sm,13px);height:36px;padding:4px 12px;border:1px solid var(--input,rgb(26 28 31 / .12));border-radius:var(--radius-lg,10px);background:transparent;color:var(--foreground,#1A1C1F);}.ds-input::placeholder{color:var(--muted-foreground,rgb(26 28 31 / .7));}.ds-input:focus-visible{outline:2px solid var(--ring,#3A83F7);outline-offset:2px;}.ds-input:disabled{opacity:.5;}",
+      "refersTo": "input"
+    },
+    {
+      "name": "侧栏行",
+      "kind": "nav",
+      "description": "默认 30px 高，用户大字号时随之增长。",
+      "html": "<button class=\"ds-nav\">Pix 样式设计</button>",
+      "css": ".ds-nav{font-family:var(--font-sans,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif);font-size:var(--text-sm,13px);font-size:var(--ui-font-size,14px);font-weight:400;display:block;width:232px;height:var(--sidebar-row-height,30px);padding:0 8px;border:0;border-radius:var(--radius-lg,10px);background:transparent;color:var(--sidebar-foreground,#1A1C1F);text-align:left;}.ds-nav:hover{background:var(--hover-fill,rgb(26 28 31 / .05));}.ds-nav:focus-visible{outline:2px solid var(--ring,#3A83F7);outline-offset:2px;}",
+      "refersTo": "sidebar-row"
+    },
+    {
+      "name": "项目标签",
+      "kind": "chip",
+      "description": "输入框上方项目栏的轻量操作标签。",
+      "html": "<button class=\"ds-chip\">Pix 工作区</button>",
+      "css": ".ds-chip{font-family:var(--font-sans,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif);font-size:var(--text-sm,13px);display:inline-flex;gap:6px;padding:4px 7.2px;border:0;border-radius:var(--radius-control,10px);background:transparent;color:var(--foreground,#1A1C1F);}.ds-chip:hover{background:color-mix(in srgb,var(--foreground,#1A1C1F) 10%,transparent);}.ds-chip:focus-visible{outline:2px solid var(--ring,#3A83F7);outline-offset:2px;}"
+    },
+    {
+      "name": "普通面板",
+      "kind": "card",
+      "description": "实色表面，保留与半透明菜单的区别。",
+      "html": "<div class=\"ds-panel\">普通面板内容</div>",
+      "css": ".ds-panel{font-family:var(--font-sans,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif);font-size:var(--text-sm,13px);padding:16px;border:1px solid var(--border-subtle,rgb(26 28 31 / .05));border-radius:var(--radius-panel,12px);background:var(--surface-panel,#FFFFFF);color:var(--foreground,#1A1C1F);}",
+      "refersTo": "panel"
+    },
+    {
+      "name": "菜单材质",
+      "kind": "custom",
+      "description": "两层细边缘与背景模糊，只模糊背后内容。",
+      "html": "<div class=\"ds-menu\"><button class=\"ds-menu-item\">重命名项目</button><button class=\"ds-menu-item\">在新窗口打开</button></div>",
+      "css": ".ds-menu{font-family:var(--font-sans,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif);font-size:var(--text-sm,13px);width:220px;padding:4px;border:0;border-radius:var(--radius-2xl,16px);background:var(--menu-background,rgb(255 255 255 / .9));color:var(--foreground,#1A1C1F);box-shadow:var(--shadow-menu,0 0 0 .5px rgb(26 28 31 / .08),0 0 0 .5px rgb(26 28 31 / .08),0 8px 16px -4px rgb(0 0 0 / .12));backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);}.ds-menu-item{font-family:var(--font-sans,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif);font-size:var(--text-sm,13px);display:block;width:100%;padding:6px 8px;border:0;border-radius:10px;text-align:left;background:transparent;color:inherit;}.ds-menu-item:hover{background:var(--hover-fill,rgb(26 28 31 / .05));}.ds-menu-item:focus-visible{outline:2px solid var(--ring,#3A83F7);outline-offset:2px;}",
+      "refersTo": "menu"
+    },
+    {
+      "name": "对话输入框",
+      "kind": "custom",
+      "description": "默认多行形态的材质示意，自动增高由真实组件处理。",
+      "html": "<div class=\"ds-composer\"><textarea class=\"ds-prompt\" aria-label=\"对话内容\" placeholder=\"描述你想构建的内容…\"></textarea><div class=\"ds-composer-tools\">GPT-5.6 Sol · 中</div></div>",
+      "css": ".ds-composer{border:0;border-radius:var(--radius-3xl,20px);background:var(--bg-composer,rgb(255 255 255 / .9));box-shadow:var(--shadow-composer,0 0 0 1px #0000000a,0 2px 8px 0 #0000000a,0 4px 80px 8px #00000006);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);overflow:hidden;}.ds-prompt{font-family:var(--font-sans,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif);font-size:var(--text-sm,13px);font-size:var(--ui-font-size,14px);font-weight:400;line-height:1.5;width:100%;min-height:64px;padding:16px 16px 6px;border:0;background:transparent;color:var(--foreground,#1A1C1F);box-sizing:border-box;resize:none;outline:none;}.ds-prompt::placeholder{color:var(--muted-foreground,rgb(26 28 31 / .7));}.ds-composer-tools{font-family:var(--font-sans,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif);font-size:var(--text-sm,13px);padding:4px 10px 10px;text-align:right;color:var(--foreground,#1A1C1F);}",
+      "refersTo": "composer"
+    }
+  ],
+  "narrative": {
+    "northStar": "克制的 Codex 桌面风格。",
+    "overview": "界面以内容、对话和工作区为中心。导航紧凑，设置以平直列表组织，颜色和字重承担层级，浮层材质用于区分前后关系。避免装饰性卡片、突出的品牌标识和导航中的粗重分隔线，延续 `apps/desktop/PRODUCT.md` 的设计方向。",
+    "keyCharacteristics": [],
+    "rules": [
+      {
+        "name": "背景模糊规则",
+        "body": "只对背后的内容使用 `backdrop-filter`；不得对整个弹层使用 `filter: blur()`。90% 指背景颜色的 alpha，不能给整块菜单设置 `opacity: 0.9` 导致文字、图标一起变淡。",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "复用语义变量、共用组件和明确的组件例外；需要新的样式时先检查现有角色。",
+      "保留默认主题与自定义皮肤、系统字体与自定义字体、明暗模式的独立性。",
+      "用背景 alpha 实现半透明，用 backdrop-filter 模糊背后内容，保持文字和图标清晰。",
+      "为模型控件保留独立字号和几何参数，为普通菜单复用同一材质。",
+      "检查长模型名、provider 分组、无思考支持、禁用态、键盘焦点、窄窗口和大字号。",
+      "让设置入口固定在侧栏滚动列表下方，让消息与输入框共用水平边界。",
+      "按实际状态区分“已实现”“专用例外”“尚未复刻”，修改实现时同步维护本文件。"
+    ],
+    "donts": [
+      "使用 PRODUCT.md 明确反对的 “decorative cards, prominent branding, and heavy separators in navigation”。",
+      "把所有圆角都改成 12px，或把每个表面都套上菜单的玻璃材质。",
+      "在普通菜单调用处重新加入不透明底色、旧圆角、重复边框和重阴影覆盖。",
+      "让模型选择器、开关、链接和默认焦点分别使用不同的旧蓝色。",
+      "给整个菜单设置 90% opacity，或对文字所在内容层使用 blur / 缩放来模拟磨砂。",
+      "给确认删除重新加回平移居中或缩放动画，破坏已完成的清晰度修复。",
+      "通过更改用户偏好来“修复”字号、缩放、侧栏宽度或皮肤造成的差异。",
+      "根据被缩小的截图推断字体模糊原因，或未经同尺度验证就声称与 Codex 像素级完全一致。"
+    ]
+  }
+}
