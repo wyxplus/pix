@@ -1,23 +1,16 @@
+import logoUrl from "../assets/logo.png";
 import { cn } from "../lib/utils.ts";
 
-/** Pix brand mark — same geometry as desktop app icon. */
+/** Same unpadded logo asset used by the desktop interface. */
 export function PixMark(props: { className?: string; title?: string }) {
   return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 1024 1024"
-      fill="none"
+    <img
+      src={logoUrl}
+      width={256}
+      height={256}
+      alt={props.title ?? "Pix"}
+      draggable={false}
       className={cn("size-7 shrink-0", props.className)}
-      role="img"
-      aria-label={props.title ?? "Pix"}
-    >
-      <title>{props.title ?? "Pix"}</title>
-      <rect width="1024" height="1024" rx="229" ry="229" fill="#FFFFFF" />
-      <g fill="#0A0A0A">
-        <rect x="250" y="298" width="524" height="104" rx="52" />
-        <rect x="308" y="350" width="100" height="378" rx="50" />
-        <rect x="548" y="350" width="100" height="300" rx="50" />
-      </g>
-    </svg>
+    />
   );
 }

@@ -1,34 +1,16 @@
-/**
- * Pix brand mark — same white plate + black π as apps/desktop/build/icon.svg.
- * In-app chrome uses the unpadded mark; the application icon adds transparent outer padding.
- * Keep the inner mark geometry in sync with icon.svg.
- */
+import logoUrl from "../assets/logo.png";
 import { cn } from "../lib/utils.ts";
 
-/**
- * Source art is 1024×1024. Bars are expressed in that space and scaled via viewBox.
- * - plate rx 229
- * - crossbar (250,298) 524×104 rx52
- * - left stem (308,350) 100×378 rx50
- * - right stem (548,350) 100×300 rx50
- */
+/** Unpadded export of the application icon in build/icon.png. */
 export function PixLogo(props: { className?: string; title?: string }) {
   return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 1024 1024"
-      fill="none"
+    <img
+      src={logoUrl}
+      width={256}
+      height={256}
+      alt={props.title ?? "Pix"}
+      draggable={false}
       className={cn("size-5 shrink-0", props.className)}
-      role="img"
-      aria-label={props.title ?? "Pix"}
-    >
-      <title>{props.title ?? "Pix"}</title>
-      <rect width="1024" height="1024" rx="229" ry="229" fill="#FFFFFF" />
-      <g fill="#0A0A0A">
-        <rect x="250" y="298" width="524" height="104" rx="52" />
-        <rect x="308" y="350" width="100" height="378" rx="50" />
-        <rect x="548" y="350" width="100" height="300" rx="50" />
-      </g>
-    </svg>
+    />
   );
 }
