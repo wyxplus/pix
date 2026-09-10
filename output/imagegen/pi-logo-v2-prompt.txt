@@ -1,0 +1,12 @@
+pi logo v2
+Generator: built-in image_gen
+Asset: pi-logo-v2.png
+
+Use case: logo-brand.
+Asset type: a final standalone desktop application icon for pi, a thoughtful minimalist coding-agent desktop app. This is a new design of its existing white rounded tile with black geometric Greek pi symbol.
+Primary request: design a distinctive beautifully proportioned new pi logo app icon, preserving the instantly recognizable lowercase Greek letter π while refining it into a bespoke fluid geometric symbol. Deliver ONE icon alone, no design sheet or mockup.
+Composition: square 1:1 image, ideally 1024 by 1024. Center a large graphite-black rounded-square app tile occupying about 84 percent of the canvas width, with generous equal transparent exterior margins. Four continuous soft corners, a front-on orthographic flat view. Center the pi symbol optically within the tile with generous internal breathing room; symbol about 56 percent of tile width.
+Symbol design: warm ivory solid pi mark made from a broad, smoothly continuous horizontal roof and two strong descending stems. Sophisticated custom geometry rather than a typed font. The top bar has a slight confident upward sweep with softly rounded terminal at left; left stem descends with a subtle outward lean and a rounded foot; right stem flows into a short elegant outward curve at bottom-right, suggesting effortless forward action. Keep it unmistakably π with a clean open negative-space arch, both stems strongly visible, balanced weight and no fragile features. More sculpted and harmonious than three rectangles, almost monoline with quiet optical corrections. The right foot should be short and restrained.
+Style/medium: premium minimal vector-like brand design, crisp clean contours and large simple shapes. Monochrome, quiet confidence, exceptionally legible at small icon sizes. Graphite tile #17191B, ivory mark #F7F5EE. Flat fills, only a barely perceptible edge highlight on tile if helpful.
+Background: genuinely transparent outside the rounded-square tile; preserve alpha. The tile itself is opaque graphite.
+Constraints: symbol only. No wordmark, no text, no slogans, no additional letters. No stars, sparkles, robot face, eyes, brackets, circuit patterns, infinity loops or generic AI ornaments. No strong gradients, no glowing effects, no metallic reflections, no glass, no extruded 3D, no perspective, no scenery, no watermark. No decorative border. Output a carefully finished standalone app-icon asset, not a presentation.
