@@ -3939,6 +3939,10 @@ html[data-theme-skin-active="true"] :is(.composer-model-trigger, .composer-model
   app-region: no-drag !important;
   transition: background 0.12s ease;
 }
+/* Keep preview dismissal clear of the Windows/Linux window action cluster. */
+html[data-custom-window-controls="true"] .content-preview-dialog-close {
+  right: max(calc(138px + 14px), env(safe-area-inset-right, 0px));
+}
 /* Decorative X only — must never be a hit target. */
 .content-preview-dialog-close::after {
   content: "";

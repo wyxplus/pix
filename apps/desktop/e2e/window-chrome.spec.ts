@@ -57,6 +57,49 @@ test("settings, projects, packages and resources keep a draggable top area", asy
   }
 });
 
+for (const platform of ["Win32", "Linux x86_64"]) {
+  test(`${platform} image preview closes without hitting window controls`, async ({
+    page,
+    pix,
+  }) => {
+    await page.addInitScript((platform) => {
+      Object.defineProperty(navigator, "platform", { value: platform });
+      Object.defineProperty(navigator, "userAgent", {
+        value:
+          platform === "Win32"
+            ? "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+            : "Mozilla/5.0 (X11; Linux x86_64)",
+      });
+    }, platform);
+    await page.reload();
+    await startHost(page);
+    await pix.app.evaluate(
+      ({ dialog }, paths) => {
+        Object.defineProperty(dialog, "showOpenDialog", {
+          configurable: true,
+          value: async () => ({ canceled: false, filePaths: paths }),
+        });
+      },
+      pix.attachmentPaths.filter((file) => file.endsWith("photo.png")),
+    );
+    await page.getByTestId("composer-attach").click();
+    await page.getByTestId("composer-attach-files").click();
+
+    for (const width of [1100, 600]) {
+      await page.setViewportSize({ width, height: 800 });
+      await page.getByTestId("attachment-image-preview").click();
+      await expect(page.getByTestId("image-preview-dialog")).toBeVisible();
+      const previewClose = page.getByTestId("content-preview-close");
+      const previewBox = (await previewClose.boundingBox())!;
+      const captionBox = (await page.getByTestId("window-caption-buttons").boundingBox())!;
+      expect(previewBox.x + previewBox.width).toBeLessThan(captionBox.x);
+      await previewClose.click();
+      await expect(page.getByTestId("image-preview-dialog")).toBeHidden();
+      expect(await pix.app.evaluate(({ window }) => window.closed)).toBe(false);
+    }
+  });
+}
+
 for (const platform of ["Win32", "Linux x86_64", "MacIntel"]) {
   test(`${platform} window controls do not depend on the runtime connection`, async ({
     page,
