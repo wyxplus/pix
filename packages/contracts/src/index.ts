@@ -1604,8 +1604,8 @@ export interface PixDesktopApi {
       /** Desktop app version (package / electron-builder). */
       appVersion: string;
       /**
-       * When true, renderer should paint min/max/close (Linux custom titlebar).
-       * Windows uses native titleBarOverlay; macOS uses traffic lights.
+       * When true, the window uses renderer min/max/close (Windows/Linux).
+       * macOS uses native traffic lights.
        */
       customWindowControls: boolean;
     }>;

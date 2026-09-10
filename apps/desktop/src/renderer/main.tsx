@@ -3195,7 +3195,7 @@ function App() {
       data-bootstrap-ready={bootstrapReady ? "true" : "false"}
     >
       <div className="skin-wallpaper" aria-hidden data-testid="skin-wallpaper" />
-      {/* Linux only (customWindowControls); Windows uses native titleBarOverlay. */}
+      {/* Tauri uses renderer caption buttons on Windows/Linux and native lights on macOS. */}
       <WindowCaptionButtons />
       {!bootstrapReady ? (
         <BootstrapOverlay
@@ -3316,7 +3316,13 @@ function App() {
                 onToggleContentMode={() => void toggleContentModeSurface()}
                 extensionUi={extensionUiState}
               />
-            ) : null}
+            ) : (
+              <div
+                className="thread-header drag-region"
+                data-testid="thread-titlebar"
+                aria-hidden
+              />
+            )}
 
             {/*
               Env panel:
@@ -4065,7 +4071,7 @@ function PackagesPage(props: {
 
   return (
     <section className="page" data-testid="packages-page">
-      <header className="page-header">
+      <header className="page-header drag-region">
         <h1>{tr("packages.title")}</h1>
         <div className="page-header-actions">
           <button
@@ -4385,7 +4391,7 @@ function ResourcesPage(props: {
     t(props.locale, key, vars);
   return (
     <section className="page" data-testid="resources-page">
-      <header className="page-header">
+      <header className="page-header drag-region">
         <h1>{tr("resources.title")}</h1>
         <div className="page-header-actions">
           <button

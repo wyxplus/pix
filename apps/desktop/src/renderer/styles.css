@@ -749,6 +749,8 @@ html[data-theme-skin-active="true"][data-theme-skin-density="comfortable"] .sett
 .drag-region {
   -webkit-app-region: drag;
   app-region: drag;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .sidebar-traffic-row button,
@@ -757,29 +759,21 @@ html[data-theme-skin-active="true"][data-theme-skin-density="comfortable"] .sett
   app-region: no-drag;
 }
 
-/*
- * Windows titleBarOverlay (Window Controls Overlay): keep interactive chrome clear of
- * native min/max/close. When env vars are absent (mac/linux), padding falls back to 1rem.
- * freeWidth = env(titlebar-area-width); controlsWidth ≈ 100vw - x - freeWidth.
- * Includes .page-header so packages/resources toolbar actions are not under caption buttons.
- */
+/* Reserve trailing room for the renderer caption buttons in every top toolbar. */
 .thread-header,
 .settings-page-top-cap,
 .page-header {
-  padding-inline-end: max(
-    1rem,
-    calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + 0.5rem)
-  );
+  padding-inline-end: 1rem;
 }
 
-/* Linux self-drawn caption cluster (see WindowCaptionButtons). */
+/* Windows/Linux caption cluster (see WindowCaptionButtons). */
 html[data-custom-window-controls="true"] .thread-header,
 html[data-custom-window-controls="true"] .settings-page-top-cap,
 html[data-custom-window-controls="true"] .page-header {
-  padding-inline-end: 138px;
+  padding-inline-end: calc(138px + 0.5rem);
 }
 
-/* Linux self-drawn caption buttons (fixed, top-right). */
+/* Windows/Linux caption buttons (fixed, top-right, above the bootstrap overlay). */
 .window-caption-buttons {
   position: fixed;
   top: 0;
@@ -808,6 +802,17 @@ html[data-custom-window-controls="true"] .page-header {
 .window-caption-btn:hover {
   background: var(--hover-fill);
   color: var(--hover-fill-foreground, var(--foreground));
+}
+.window-caption-buttons[data-platform="windows"] {
+  gap: 0;
+  padding: 0;
+}
+.window-caption-buttons[data-platform="windows"] .window-caption-btn {
+  border-radius: 0;
+}
+.window-caption-btn:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
 .window-caption-btn-close:hover {
   background: #e81123;
@@ -1282,13 +1287,13 @@ html:not([data-theme-skin-active="true"]) .pix-sidebar-translucent {
 }
 
 .thread-header {
-  /* padding-inline-end: Windows titleBarOverlay — see rule above with .settings-page-top-cap */
+  /* Caption button clearance is shared with .settings-page-top-cap above. */
   @apply flex h-[46px] shrink-0 items-center gap-2 pl-5;
 }
 
 /* Collapsed rail: titlebar row shares the window edge with traffic lights + expand btn.
    Left inset comes from a no-drag spacer in ThreadHeader (not padding — padding stays drag).
-   Keep right WCO/caption padding from .thread-header — do not reset padding-right. */
+   Keep right caption padding from .thread-header — do not reset padding-right. */
 .thread-header-collapsed {
   @apply pl-0;
 }
@@ -4385,7 +4390,7 @@ html[data-theme-skin-active="true"] :is(.composer-model-trigger, .composer-model
 }
 .page-header {
   @apply flex shrink-0 items-center justify-between gap-3 py-3 pl-6;
-  /* pr comes from WCO/caption rule above — do not set a fixed pr that fights overlay inset. */
+  /* Right padding comes from the shared caption clearance rule above. */
   border-color: var(--border);
   min-height: 46px; /* TITLEBAR_HEIGHT_PX — sit under Windows caption strip */
 }

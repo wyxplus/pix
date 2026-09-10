@@ -12,7 +12,7 @@ export async function launchTauriHarness(
 ) {
   let page: Page | undefined;
   const native = {
-    window: { scale: 1, maximized: false },
+    window: { scale: 1, maximized: false, minimized: false, closed: false, dragStarts: 0 },
     nativeTheme: { themeSource: "system" },
     shell: {
       openPath: async (_path: string) => "",
@@ -103,8 +103,19 @@ export async function launchTauriHarness(
     if (command === "plugin:window|is_maximized") return native.window.maximized;
     if (command === "plugin:window|toggle_maximize") {
       native.window.maximized = !native.window.maximized;
+      await page!.evaluate(
+        (isMaximized) =>
+          (window as any).__pixTestEvent({
+            channel: "pix:window:state",
+            payload: { isMaximized },
+          }),
+        native.window.maximized,
+      );
       return;
     }
+    if (command === "plugin:window|start_dragging") native.window.dragStarts++;
+    if (command === "plugin:window|minimize") native.window.minimized = true;
+    if (command === "plugin:window|close") native.window.closed = true;
     if (command.startsWith("plugin:window|")) return;
     throw new Error(`Unhandled Tauri test invocation: ${command}`);
   });

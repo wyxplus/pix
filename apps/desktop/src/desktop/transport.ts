@@ -84,8 +84,9 @@ async function downloadUpdate(): Promise<AppUpdateStatus> {
 
 export const ipcRenderer = {
   async invoke(channel: string, ...args: unknown[]): Promise<any> {
-    await listening;
     const win = getCurrentWindow();
+    // Native window controls must work independently of the sidecar/event handshake.
+    if (!channel.startsWith("pix:window:")) await listening;
     switch (channel) {
       case "pix:window:minimize":
         return win.minimize();
@@ -153,12 +154,14 @@ document.addEventListener("mousedown", (event) => {
   if (!event.target.closest(".drag-region, .bootstrap-overlay")) return;
   if (
     event.target.closest(
-      "button, a, input, textarea, select, [role=button], .no-drag, .bootstrap-overlay-inner",
+      "button, a, input, textarea, select, [role=button], [contenteditable]:not([contenteditable=false]), .no-drag, .bootstrap-overlay-inner",
     )
   )
     return;
-  if (event.detail === 2) void getCurrentWindow().toggleMaximize();
-  else void getCurrentWindow().startDragging();
+  event.preventDefault();
+  const action =
+    event.detail === 2 ? getCurrentWindow().toggleMaximize() : getCurrentWindow().startDragging();
+  void action.catch((error) => console.error("Window titlebar action failed", error));
 });
 
 void listening

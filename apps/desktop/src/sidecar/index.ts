@@ -4225,7 +4225,7 @@ void (async () => {
       process.env.PIX_ENABLE_TEST_COMMANDS === "1" ||
       process.env.PIX_ENABLE_TEST_COMMANDS === "true",
     appVersion: app.getVersion(),
-    /** Windows uses native titleBarOverlay buttons; Linux needs renderer caption buttons. */
+    /** Windows/Linux use renderer caption buttons; macOS supplies native traffic lights. */
     customWindowControls: process.platform !== "darwin",
   }));
   rpc.handle("pix:proxy:get", () => getProxyPrefs());

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
-  LINUX_CAPTION_BUTTONS_WIDTH_PX,
+  CUSTOM_CAPTION_BUTTONS_WIDTH_PX,
   MAC_TRAFFIC_LIGHT_GUTTER_PX,
   MAC_TRAFFIC_LIGHT_INSET_X_PX,
   NON_MAC_TITLEBAR_LEADING_GUTTER_PX,
@@ -27,7 +27,7 @@ describe("desktop chrome geometry", () => {
     expect(titlebarLeadingGutterPx(true)).toBe(MAC_TRAFFIC_LIGHT_GUTTER_PX);
     expect(titlebarLeadingGutterPx(false)).toBe(NON_MAC_TITLEBAR_LEADING_GUTTER_PX);
     expect(titlebarControlTopPx(28)).toBe(9);
-    expect(LINUX_CAPTION_BUTTONS_WIDTH_PX).toBeGreaterThan(100);
+    expect(CUSTOM_CAPTION_BUTTONS_WIDTH_PX).toBe(TITLEBAR_HEIGHT_PX * 3);
   });
 
   it("detects mac / windows desktop chrome from platform / UA", () => {

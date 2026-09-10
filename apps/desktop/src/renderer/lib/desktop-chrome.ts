@@ -1,7 +1,7 @@
 /**
  * Desktop chrome geometry (aligned with Synara desktopChrome.ts on macOS).
  * All platforms use a frameless / hidden title strip + in-app titlebar row.
- * Main process trafficLightPosition / titleBarOverlay height must stay in lockstep.
+ * Tauri trafficLightPosition and renderer caption buttons share the same row height.
  */
 
 /** Shared titlebar row height (traffic lights / window chrome vertically centered). */
@@ -21,15 +21,15 @@ export const MAC_TRAFFIC_LIGHT_GUTTER_PX = 90;
 
 /**
  * Non-mac leading pad: no traffic lights on the left; collapse control sits near the edge.
- * (Windows caption buttons are on the right via titleBarOverlay / WCO env vars.)
+ * Windows/Linux renderer caption buttons occupy the right edge.
  */
 export const NON_MAC_TITLEBAR_LEADING_GUTTER_PX = 12;
 
 /**
- * Approximate width of Linux self-drawn caption cluster (min / max / close).
- * Windows uses CSS `env(titlebar-area-*)` instead.
+ * Reserved width for the renderer caption cluster (min / max / close).
+ * Windows uses three 46px buttons; Linux fits smaller buttons within the same gutter.
  */
-export const LINUX_CAPTION_BUTTONS_WIDTH_PX = 138;
+export const CUSTOM_CAPTION_BUTTONS_WIDTH_PX = 138;
 
 /** Control size matching Synara `size-7` icon buttons. */
 export const TITLEBAR_CONTROL_SIZE_PX = 28;

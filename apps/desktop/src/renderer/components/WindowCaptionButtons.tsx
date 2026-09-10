@@ -1,50 +1,61 @@
 /**
- * Self-drawn window caption buttons for Linux (titleBarStyle: hidden, no titleBarOverlay).
- * Windows uses native caption buttons via Electron titleBarOverlay.
+ * Tauri's undecorated Windows/Linux windows need renderer caption buttons.
+ * Only macOS has native controls, supplied by tauri.macos.conf.json.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import { Minus, Square, X, Copy } from "lucide-react";
-import { TITLEBAR_HEIGHT_PX, titlebarControlTopPx } from "../lib/desktop-chrome.ts";
+import {
+  TITLEBAR_HEIGHT_PX,
+  isMacDesktopChrome,
+  isWindowsDesktopChrome,
+  titlebarControlTopPx,
+} from "../lib/desktop-chrome.ts";
 import { cn } from "../lib/utils.ts";
 
 export function WindowCaptionButtons() {
-  const [visible, setVisible] = useState(false);
+  // Window chrome must remain usable while the sidecar starts or fails to connect.
+  const visible = !isMacDesktopChrome();
+  const windows = isWindowsDesktopChrome();
   const [maximized, setMaximized] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    let unsub: (() => void) | undefined;
-    void (async () => {
-      try {
-        const runtime = await window.pix.app.getRuntime();
-        if (cancelled || !runtime.customWindowControls) return;
-        setVisible(true);
-        document.documentElement.dataset.customWindowControls = "true";
-        const isMax = await window.pix.window.isMaximized();
-        if (!cancelled) setMaximized(isMax);
-        unsub = window.pix.window.onStateChange((state) => {
-          setMaximized(state.isMaximized);
-        });
-      } catch {
-        // Browser / tests without full desktop API.
-      }
-    })();
+  useLayoutEffect(() => {
+    if (!visible) return;
+    document.documentElement.dataset.customWindowControls = "true";
     return () => {
-      cancelled = true;
-      unsub?.();
       delete document.documentElement.dataset.customWindowControls;
     };
-  }, []);
+  }, [visible]);
+
+  useEffect(() => {
+    if (!visible) return;
+    let cancelled = false;
+    const unsub = window.pix.window.onStateChange((state) => {
+      if (!cancelled) setMaximized(state.isMaximized);
+    });
+    void window.pix.window.isMaximized().then(
+      (isMax) => {
+        if (!cancelled) setMaximized(isMax);
+      },
+      () => {
+        // Keep the controls visible even if the initial native state is unavailable.
+      },
+    );
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, [visible]);
 
   if (!visible) return null;
 
-  const btnSize = 28;
+  const btnSize = windows ? TITLEBAR_HEIGHT_PX : 28;
   const top = titlebarControlTopPx(btnSize);
 
   return (
     <div
       className="window-caption-buttons no-drag"
       data-testid="window-caption-buttons"
+      data-platform={windows ? "windows" : "linux"}
       style={{ height: TITLEBAR_HEIGHT_PX, top: 0 }}
       role="group"
       aria-label="Window"
@@ -67,7 +78,7 @@ export function WindowCaptionButtons() {
         title={maximized ? "Restore" : "Maximize"}
         aria-label={maximized ? "Restore" : "Maximize"}
         data-testid="window-maximize"
-        onClick={() => void window.pix.window.toggleMaximize()}
+        onClick={() => void window.pix.window.toggleMaximize().then(setMaximized)}
       >
         {maximized ? (
           <Copy className="size-3.5 scale-x-[-1]" strokeWidth={1.75} />

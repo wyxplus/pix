@@ -58,10 +58,28 @@ await test(
       const runtime = await page.evaluate(() => window.pix.app.getRuntime());
       assert.equal(runtime.platform, "win32");
       assert.equal(runtime.isPackaged, true);
+      assert.equal(runtime.customWindowControls, true);
+      await page.getByTestId("window-caption-buttons").waitFor();
+      for (const id of ["window-minimize", "window-maximize", "window-close"]) {
+        assert.ok(await page.getByTestId(id).isVisible(), `${id} must be visible on Windows`);
+      }
       console.log("Native window connected to Sidecar");
       await page.locator('[data-testid="pix-app"][data-bootstrap-ready="true"]').waitFor({
         timeout: 60_000,
       });
+      const wasMaximized = await page.evaluate(() => window.pix.window.isMaximized());
+      await page.getByTestId("window-maximize").click();
+      await page.waitForFunction(
+        async (expected) => (await window.pix.window.isMaximized()) === expected,
+        !wasMaximized,
+      );
+      await page.getByTestId("window-maximize").click();
+      await page.waitForFunction(
+        async (expected) => (await window.pix.window.isMaximized()) === expected,
+        wasMaximized,
+      );
+      await page.getByTestId("thread-titlebar").waitFor();
+      console.log("Native caption buttons maximize and restore the window successfully");
       await page.getByTestId("nav-settings").click();
       await page.getByTestId("settings-nav-models").click();
       await page.getByTestId("settings-models").waitFor();

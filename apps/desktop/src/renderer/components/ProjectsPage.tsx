@@ -257,7 +257,7 @@ export function ProjectsPage(props: ProjectsPageProps) {
 
   return (
     <section className="page projects-page" data-testid="projects-page">
-      <header className="page-header projects-page-header">
+      <header className="page-header projects-page-header drag-region">
         <h1>{tr("projectsPage.title")}</h1>
         <div className="page-header-actions">
           <button
