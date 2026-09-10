@@ -135,6 +135,8 @@ describe("platform tool defaults", () => {
     });
   });
 
+  // Native cold startup can exceed Vitest's default five-second test budget.
+  // Keep each command's own timeout below the enclosing test timeout.
   it.runIf(process.platform === "win32")(
     "falls back to Windows PowerShell without Git Bash or PowerShell 7 on PATH",
     async () => {
@@ -148,6 +150,7 @@ describe("platform tool defaults", () => {
       expect(JSON.stringify(result.content)).toContain("Desktop");
       expect(JSON.stringify(result.content)).toContain("中文回退");
     },
+    30_000,
   );
 
   it.runIf(process.platform === "win32")(
@@ -167,5 +170,6 @@ describe("platform tool defaults", () => {
         tool.execute("powershell-failure", { command: "exit 7", timeout: 10 }),
       ).rejects.toThrow("Command exited with code 7");
     },
+    30_000,
   );
 });
