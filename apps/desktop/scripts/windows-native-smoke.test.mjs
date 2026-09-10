@@ -70,8 +70,16 @@ await test(
         return window.pix.models.refreshCatalog();
       });
       assert.ok(models.some((model) => model.provider === "pix-fake" && model.id === "pix-fake"));
-      assert.ok(!(await page.locator("body").innerText()).includes("Node Agent Sidecar exited"));
+      await page.getByTestId("models-custom-group-custom:pix-fake-toggle").click();
+      await page.getByTestId("provider-row-pix-fake").waitFor();
       console.log("Installed model settings loaded successfully");
+      await page.getByTestId("settings-back").click();
+      await page.getByTestId("model-select-wrap").click();
+      await page.getByTestId("composer-model-list-trigger").click();
+      await page.getByTestId("composer-model-pix-fake").click();
+      assert.match(await page.getByTestId("model-select-label").innerText(), /Pix Fake Model/);
+      assert.ok(!(await page.locator("body").innerText()).includes("Node Agent Sidecar exited"));
+      console.log("Installed composer model picker selected the model successfully");
     } catch (error) {
       console.error("Native application output:\n", stderr);
       throw error;
