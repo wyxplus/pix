@@ -18,6 +18,7 @@ import { promisify } from "node:util";
 import { execFile } from "node:child_process";
 import { detectPiCli, isProjectLocalPiPath } from "./pi-cli-ensure.ts";
 import { augmentEnvPath } from "./shell-path.ts";
+import { resolveNodeCliLaunch } from "./node-cli-launch.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -235,7 +236,8 @@ async function npmGlobalRoot(env: NodeJS.ProcessEnv): Promise<string | undefined
   const resolvedEnv = augmentEnvPath(env);
   try {
     const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm";
-    const { stdout } = await execFileAsync(npmCmd, ["root", "-g"], {
+    const launch = resolveNodeCliLaunch(npmCmd, ["root", "-g"], resolvedEnv);
+    const { stdout } = await execFileAsync(launch.file, launch.args, {
       env: resolvedEnv,
       windowsHide: true,
       cwd: process.platform === "win32" ? resolvedEnv.TEMP || resolvedEnv.TMP || homedir() : "/tmp",

@@ -18,6 +18,8 @@ pi configuration, models, credentials, packages, extensions, tools and sessions 
 
 Pix uses pi SDK 0.85.1. On Windows, sessions default to `read`, `powershell`, `edit`, `write`, `ls`, `find`, and `grep`. The native PowerShell tool prefers `pwsh.exe` on PATH and falls back to `powershell.exe`; Git Bash is not required for model-driven PowerShell commands. Explicit pi `defaultTools` settings and tool restrictions take precedence, and extension tools remain enabled by default. These platform defaults are not written to the user's settings. macOS/Linux retain pi's defaults. Manual `!`/`!!` commands still use Bash.
 
+See [Windows usage](WINDOWS.md) for GUI PATH recovery, Unicode output, external terminals, and CLI/TUI configuration.
+
 ## Requirements
 
 - Node.js **24+** and pnpm **11.15.1** for development/builds.

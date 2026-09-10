@@ -22,6 +22,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Verify PowerShell execution and platform tool lifecycle
         run: pnpm --filter @pix/agent-runtime exec vp test --run test/platform-tools.test.ts
+      - name: Verify Windows paths, Node CLI shims and external terminal launch
+        run: pnpm --filter @pix/desktop exec vp test --run --config vite.renderer.config.ts ../main/shell-path.test.ts ../main/node-cli-launch.test.ts ../main/windows-terminal.test.ts
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 30

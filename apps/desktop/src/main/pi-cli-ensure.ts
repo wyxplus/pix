@@ -10,6 +10,7 @@ import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
+import { resolveNodeCliLaunch } from "./node-cli-launch.ts";
 import {
   applyProcessPathAugmentation,
   augmentEnvPath,
@@ -182,7 +183,8 @@ async function resolveOnPath(command: string, env: NodeJS.ProcessEnv): Promise<s
 
 async function readPiVersion(piPath: string, env: NodeJS.ProcessEnv): Promise<string | undefined> {
   try {
-    const { stdout, stderr } = await execFileAsync(piPath, ["--version"], {
+    const launch = resolveNodeCliLaunch(piPath, ["--version"], env);
+    const { stdout, stderr } = await execFileAsync(launch.file, launch.args, {
       env,
       windowsHide: true,
       timeout: 12_000,
@@ -202,7 +204,8 @@ async function npmGlobalPrefix(
   env: NodeJS.ProcessEnv,
 ): Promise<string | undefined> {
   try {
-    const { stdout } = await execFileAsync(npmPath, ["prefix", "-g"], {
+    const launch = resolveNodeCliLaunch(npmPath, ["prefix", "-g"], env);
+    const { stdout } = await execFileAsync(launch.file, launch.args, {
       env,
       windowsHide: true,
       // Run outside any project so packageManager/devEngines cannot fail the probe.
@@ -342,23 +345,11 @@ function spawnNpmInstall(npmPath: string, env: NodeJS.ProcessEnv): ChildProcess 
   const args = ["install", "-g", "--ignore-scripts", `${PI_NPM_PACKAGE}@latest`];
   // Install from a neutral cwd so monorepo packageManager/devEngines cannot block npm.
   const cwd = process.platform === "win32" ? env.TEMP || env.TMP || homedir() : "/tmp";
-  // On Windows, always shell + prefer .cmd path so PATHEXT resolves correctly.
-  if (process.platform === "win32") {
-    const cmd =
-      /\.(cmd|bat|exe)$/i.test(npmPath) || npmPath.toLowerCase().endsWith("npm.cmd")
-        ? npmPath
-        : "npm.cmd";
-    return spawn(cmd, args, {
-      env,
-      cwd,
-      windowsHide: true,
-      shell: true,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-  }
-  return spawn(npmPath, args, {
+  const launch = resolveNodeCliLaunch(npmPath, args, env);
+  return spawn(launch.file, launch.args, {
     env,
     cwd,
+    windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],
   });
 }

@@ -68,6 +68,7 @@ import {
 } from "../main/host-park-policy.ts";
 import { formatHostExitError, resolveAgentHostEntry } from "../main/host-spawn.ts";
 import { ensurePiCli, type PiCliProgressEvent } from "../main/pi-cli-ensure.ts";
+import { openWindowsTerminal } from "../main/windows-terminal.ts";
 import {
   buildPiSdkActivity,
   buildPiSdkStatus,
@@ -1505,6 +1506,7 @@ async function listOpenTargets(cwd: string): Promise<DetectedApp[]> {
       },
       { id: "wt", name: "Windows Terminal", kind: "terminal", target: "wt" },
       { id: "cmd", name: "Command Prompt", kind: "terminal", target: "cmd" },
+      { id: "pwsh", name: "PowerShell 7", kind: "terminal", target: "pwsh" },
       { id: "powershell", name: "PowerShell", kind: "terminal", target: "powershell" },
     ];
 
@@ -1686,23 +1688,8 @@ end tell`;
     return;
   }
   if (process.platform === "win32") {
-    if (found.id === "wt") {
-      await execFileAsync("wt", ["-d", cwd], { windowsHide: true, shell: true });
-      return;
-    }
-    if (found.id === "cmd") {
-      await execFileAsync("cmd", ["/c", "start", "cmd", "/k", `cd /d ${cwd}`], {
-        windowsHide: true,
-        shell: true,
-      });
-      return;
-    }
-    if (found.id === "powershell") {
-      await execFileAsync(
-        "powershell",
-        ["-NoExit", "-Command", `Set-Location -LiteralPath '${cwd.replace(/'/g, "''")}'`],
-        { windowsHide: true, shell: true },
-      );
+    if (["wt", "cmd", "pwsh", "powershell"].includes(found.id)) {
+      await openWindowsTerminal(found, cwd);
       return;
     }
     await execFileAsync(found.target, [cwd], { windowsHide: true, shell: true });
