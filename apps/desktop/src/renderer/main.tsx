@@ -3608,11 +3608,7 @@ function App() {
                             serviceTiers={displayServiceTiers}
                             onServiceTierChange={(tier) => void changeServiceTier(tier)}
                             contextPercent={snapshot?.usage?.context?.percent ?? undefined}
-                            contextTokens={
-                              snapshot?.usage?.context?.tokens ??
-                              snapshot?.usage?.tokens.total ??
-                              undefined
-                            }
+                            contextTokens={snapshot?.usage?.context?.tokens ?? undefined}
                             showContextUsage={showContextUsage}
                             projectTrusted={snapshot?.projectTrusted}
                             runState={runState}

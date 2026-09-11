@@ -291,25 +291,29 @@ function accessDesc(locale: Locale, mode: AccessMode): string {
   return t(locale, "composer.access.defaultDesc");
 }
 
-function formatContext(percent: number | undefined, tokens: number | undefined): string {
+function formatContext(
+  percent: number | undefined,
+  tokens: number | undefined,
+): string | undefined {
   if (percent != null && Number.isFinite(percent)) return `${Math.round(percent)}%`;
   if (tokens != null && Number.isFinite(tokens) && tokens > 0) {
     if (tokens >= 1000) return `${(tokens / 1000).toFixed(tokens >= 10_000 ? 0 : 1)}k`;
     return `${tokens}`;
   }
-  // No live usage yet — show empty capacity, never a dash.
-  return "0%";
+  // Before the first response and immediately after compaction, usage is unknown.
+  return undefined;
 }
 
 function ContextUsageIndicator(props: {
   label: string;
+  unknownLabel: string;
   percent: number | undefined;
   tokens: number | undefined;
 }) {
   const rawPercent = props.percent;
   const hasPercent = rawPercent != null && Number.isFinite(rawPercent);
   const value = hasPercent ? Math.min(100, Math.max(0, Math.round(rawPercent))) : 0;
-  const detail = formatContext(props.percent, props.tokens);
+  const detail = formatContext(props.percent, props.tokens) ?? props.unknownLabel;
   const accessibleLabel = `${props.label}: ${detail}`;
 
   return (
@@ -1484,6 +1488,7 @@ export function Composer(props: ComposerProps) {
             {props.showContextUsage !== false ? (
               <ContextUsageIndicator
                 label={tr("composer.context")}
+                unknownLabel={tr("composer.contextUnknown")}
                 percent={props.contextPercent}
                 tokens={props.contextTokens}
               />
