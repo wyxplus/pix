@@ -52,6 +52,7 @@ import { PixLogo } from "./components/PixLogo.tsx";
 import { ThreadHeader } from "./components/ThreadHeader.tsx";
 import { PiTuiTerminal, preloadPiTuiTerminal } from "./components/PiTuiTerminal.tsx";
 import { WindowCaptionButtons } from "./components/WindowCaptionButtons.tsx";
+import { WindowCloseDialog } from "./components/WindowCloseDialog.tsx";
 import { SessionTimelineScroller } from "./components/SessionTimelineContent.tsx";
 import { SelectionSideChat } from "./components/SelectionSideChat.tsx";
 import { useSideChatStore } from "./store/side-chat-store.ts";
@@ -3293,6 +3294,7 @@ function App() {
       <div className="skin-wallpaper" aria-hidden data-testid="skin-wallpaper" />
       {/* Tauri uses renderer caption buttons on Windows/Linux and native lights on macOS. */}
       <WindowCaptionButtons />
+      <WindowCloseDialog locale={locale} />
       {!bootstrapReady ? (
         <BootstrapOverlay
           status={bootstrapStatus}

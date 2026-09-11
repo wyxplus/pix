@@ -55,6 +55,7 @@ jobs:
         shell: pwsh
         run: |
           $env:PIX_NATIVE_EXECUTABLE = Join-Path $env:RUNNER_TEMP 'Pix 安装 Smoke/pix-desktop.exe'
+          ./apps/desktop/scripts/windows-icon-smoke.ps1 -Executable $env:PIX_NATIVE_EXECUTABLE -Icon apps/desktop/build/icon.ico
           # Hosted Windows runners are elevated; current WebView2 ignores env
           # debugger overrides there. Scope the policy to this app on this VM.
           $policy = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge\WebView2'

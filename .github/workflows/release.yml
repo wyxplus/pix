@@ -77,6 +77,10 @@ jobs:
         run: |
           $env:PIX_SMOKE_NODE = (Resolve-Path 'apps/desktop/src-tauri/binaries/node.exe').Path
           cargo test --release --locked --manifest-path apps/desktop/src-tauri/Cargo.toml sidecar::tests
+      - name: Verify Windows executable icon
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./apps/desktop/scripts/windows-icon-smoke.ps1 -Executable apps/desktop/src-tauri/target/release/pix-desktop.exe -Icon apps/desktop/build/icon.ico
       - name: Collect Tauri assets
         run: node scripts/release-assets.mjs collect apps/desktop/src-tauri/target/release/bundle artifacts --target ${{ matrix.target }}
       - uses: actions/upload-artifact@v4

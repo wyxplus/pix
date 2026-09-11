@@ -141,6 +141,7 @@ import { isConversationWorkspacePath, workspaceLabel } from "../../lib/workspace
 import { useShellStore, type SettingsSection } from "../../store/shell-store.ts";
 import { PiSdkSection } from "./PiSdkSection.tsx";
 import { RuntimesSection } from "./RuntimesSection.tsx";
+import { WindowCloseSettings } from "./WindowCloseSettings.tsx";
 import { ThemeSkinStudio } from "./ThemeSkinStudio.tsx";
 import {
   Command,
@@ -2420,6 +2421,7 @@ function GeneralSection(
       </SettingsSectionBlock>
 
       <SettingsSectionBlock label={tr("settings.section.general")} testId="settings-general-card">
+        <WindowCloseSettings locale={props.locale} />
         <SettingsRow
           title={tr("settings.projectTrusted")}
           description={tr("settings.projectTrustedHint")}

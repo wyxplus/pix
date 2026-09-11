@@ -98,6 +98,36 @@ await test(
       assert.match(await page.getByTestId("model-select-label").innerText(), /Pix Fake Model/);
       assert.ok(!(await page.locator("body").innerText()).includes("Node Agent Sidecar exited"));
       console.log("Installed composer model picker selected the model successfully");
+      await page.getByTestId("window-close").click();
+      await page.getByTestId("window-close-dialog").waitFor();
+      await page.getByTestId("window-close-cancel").click();
+      assert.equal(child.exitCode, null, "Cancelling close must keep Pix running");
+      const beforeHide = await page.evaluate(() => window.pix.host.snapshot());
+      await page.getByTestId("window-close").click();
+      await page.getByTestId("window-close-remember").check();
+      await page.getByTestId("window-close-confirm").click();
+      await page.waitForFunction(
+        async () =>
+          !(await window.__TAURI_INTERNALS__.invoke("plugin:window|is_visible", { label: "main" })),
+      );
+      assert.equal(child.exitCode, null, "Hiding to the tray must keep Pix running");
+      const afterHide = await page.evaluate(() => window.pix.host.snapshot());
+      assert.equal(
+        afterHide.runtimeId,
+        beforeHide.runtimeId,
+        "Hiding must preserve the active Host",
+      );
+      assert.equal(
+        await page.evaluate(() => localStorage.getItem("pix.window.closeBehavior")),
+        "tray",
+      );
+      console.log("Installed close prompt hid the window to a live tray and kept the Host running");
+      // Exercise the same explicit-exit action used by the close dialog. A CDP
+      // disconnect is expected if the process exits before its RPC resolves.
+      await page.evaluate(() => window.pix.window.resolveClose("quit")).catch(() => {});
+      const quitDeadline = Date.now() + 15_000;
+      while (child.exitCode === null && Date.now() < quitDeadline) await delay(100);
+      assert.equal(child.exitCode, 0, `Explicit quit did not exit cleanly: ${stderr}`);
     } catch (error) {
       console.error("Native application output:\n", stderr);
       throw error;

@@ -1693,6 +1693,9 @@ export interface PixDesktopApi {
     minimize(): Promise<void>;
     toggleMaximize(): Promise<boolean>;
     close(): Promise<void>;
+    /** Intercepts both the caption button and native close requests (e.g. Alt+F4). */
+    onCloseRequested(listener: () => void): Promise<() => void>;
+    resolveClose(action: "tray" | "quit"): Promise<void>;
     isMaximized(): Promise<boolean>;
     onStateChange(listener: (state: { isMaximized: boolean }) => void): () => void;
   };
