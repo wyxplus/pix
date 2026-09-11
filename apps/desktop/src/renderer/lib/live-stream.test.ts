@@ -15,18 +15,18 @@ describe("appendMonotonicText", () => {
     expect(appendMonotonicText("Hello", "!")).toBe("Hello!");
   });
 
-  it("accepts cumulative full-text snapshots without shrinking", () => {
-    expect(appendMonotonicText("Hel", "Hello")).toBe("Hello");
-    expect(appendMonotonicText("Hello", "Hello")).toBe("Hello");
+  it("preserves repeated characters even when the next chunk starts with the buffer", () => {
+    expect(appendMonotonicText("哈", "哈哈")).toBe("哈哈哈");
+    expect(appendMonotonicText("0", "0")).toBe("00");
   });
 
-  it("ignores exact chunk redelivery", () => {
-    expect(appendMonotonicText("Hello", "lo")).toBe("Hello");
-    expect(appendMonotonicText("Hello world", "world")).toBe("Hello world");
+  it("preserves repeated digits and newlines instead of treating them as redelivery", () => {
+    expect(appendMonotonicText("10", "0")).toBe("100");
+    expect(appendMonotonicText("Header\n", "\n")).toBe("Header\n\n");
   });
 
-  it("repairs partial overlap without losing prefix", () => {
-    expect(appendMonotonicText("Hello wor", "world!")).toBe("Hello world!");
+  it("preserves a table delimiter chunk that overlaps a prior column", () => {
+    expect(appendMonotonicText("| --- ", "| --- |\n")).toBe("| --- | --- |\n");
   });
 
   it("never returns a shorter string than prev when delta is non-empty prefix-lossy", () => {
@@ -159,23 +159,52 @@ describe("live stream (append-only)", () => {
     expect(assistant?.kind === "assistant" && assistant.text.includes("x199")).toBe(true);
   });
 
-  it("handles cumulative provider snapshots without eating the head", () => {
+  it("keeps identical text from distinct host sequences", () => {
     let state = emptyLiveStream();
-    state = applyRuntimeEventToLiveStream(state, { type: "message.delta", delta: "The" }, [], {
+    state = applyRuntimeEventToLiveStream(state, { type: "message.delta", delta: "| --- " }, [], {
       sequence: 1,
     });
-    state = applyRuntimeEventToLiveStream(state, { type: "message.delta", delta: "The cat" }, [], {
+    state = applyRuntimeEventToLiveStream(state, { type: "message.delta", delta: "| --- " }, [], {
       sequence: 2,
     });
-    state = applyRuntimeEventToLiveStream(
-      state,
-      { type: "message.delta", delta: "The cat sat" },
-      [],
-      { sequence: 3 },
-    );
+    state = applyRuntimeEventToLiveStream(state, { type: "message.delta", delta: "|\n" }, [], {
+      sequence: 3,
+    });
     const assistant = state.items.find((item) => item.kind === "assistant");
-    expect(assistant?.kind === "assistant" && assistant.text).toBe("The cat sat");
+    expect(assistant?.kind === "assistant" && assistant.text).toBe("| --- | --- |\n");
   });
+
+  it.each(["message.delta", "thinking.delta"] as const)(
+    "preserves complete Markdown under different %s chunk boundaries and replays",
+    (type) => {
+      const markdown = [
+        "统计：",
+        "",
+        "| 项目 | 数值 |",
+        "| --- | --- |",
+        "| 收入 | 1000 |",
+        "| 空值 | |",
+        "",
+        "```js",
+        "const empty = [];",
+        "const nested = [[1000]];",
+        "```",
+      ].join("\n");
+      for (let size = 1; size <= 32; size++) {
+        let state = emptyLiveStream();
+        let sequence = 0;
+        for (let offset = 0; offset < markdown.length; offset += size) {
+          const event = { type, delta: markdown.slice(offset, offset + size) };
+          state = applyRuntimeEventToLiveStream(state, event, [], { sequence: ++sequence });
+          // A true redelivery repeats the sequence, regardless of its text.
+          state = applyRuntimeEventToLiveStream(state, event, [], { sequence });
+        }
+        const item = state.items[0];
+        expect(item?.kind === "assistant" || item?.kind === "thinking").toBe(true);
+        expect(item && "text" in item && item.text).toBe(markdown);
+      }
+    },
+  );
 
   it("keeps attachment chips on optimistic user rows and merges host echo paths", () => {
     let state = emptyLiveStream();
