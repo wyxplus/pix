@@ -22,6 +22,18 @@ describe("Sidecar shutdown protocol", () => {
     child.stderr!.on("data", (chunk) => {
       stderr += chunk;
     });
+    const readFrames = async () => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of child.stdout!) chunks.push(Buffer.from(chunk));
+      return Buffer.concat(chunks)
+        .toString("utf8")
+        .trimEnd()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+    };
+    // Windows pipe writes are synchronous, so a paused reader would prevent the
+    // child from processing either its IPC notification or the shutdown request.
+    const windowsFrames = process.platform === "win32" ? readFrames() : undefined;
     try {
       await new Promise<void>((resolve, reject) => {
         child.once("message", () => resolve());
@@ -31,14 +43,8 @@ describe("Sidecar shutdown protocol", () => {
       child.stdin!.write('{"version":1,"kind":"shutdown"}\n');
       // Leave stdout paused until shutdown begins, forcing a pending pipe write.
       await delay(50);
-      const chunks: Buffer[] = [];
-      for await (const chunk of child.stdout!) chunks.push(Buffer.from(chunk));
+      const frames = await (windowsFrames ?? readFrames());
       expect(await exit, stderr).toBe(0);
-      const frames = Buffer.concat(chunks)
-        .toString("utf8")
-        .trimEnd()
-        .split("\n")
-        .map((line) => JSON.parse(line));
       expect(frames).toHaveLength(2);
       expect(frames[1].payload).toBe("分析数据".repeat(250000));
     } finally {

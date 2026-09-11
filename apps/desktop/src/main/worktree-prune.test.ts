@@ -61,6 +61,7 @@ describe("safe managed worktree cleanup", () => {
       for (const name of ["tracked", "untracked", "ignored", "locked", "active", "detached"]) {
         await expect(
           removeWorktreeSafely({ repoCwd: repo, path: paths[name]!, protectedPaths }),
+          `manual deletion must refuse ${name}`,
         ).rejects.toThrow();
       }
       const removed = await pruneManagedWorktreesSafely({

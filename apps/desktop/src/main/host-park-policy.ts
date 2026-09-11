@@ -6,6 +6,7 @@
 /** Cap idle parked hosts. Busy parks are never evicted to make room. */
 import { normalizePathKey } from "@pix/contracts";
 import { realpathSync } from "node:fs";
+import { basename, dirname, isAbsolute, join } from "node:path";
 
 export const MAX_PARKED_HOSTS = 5;
 
@@ -19,7 +20,21 @@ export function normalizeHostCwdKey(path: string): string {
     // case for distinct POSIX directories. Never probe by writing to a volume.
     return normalizePathKey(realpathSync.native(path));
   } catch {
-    // Missing/imported paths still have a stable platform-aware spelling.
+    // Resolve the existing ancestor of a not-yet-created working directory too.
+    // Otherwise a junction/short-name alias differs from its existing worktree.
+    if (isAbsolute(path)) {
+      let parent = path;
+      const suffix: string[] = [];
+      while (dirname(parent) !== parent) {
+        suffix.unshift(basename(parent));
+        parent = dirname(parent);
+        try {
+          return normalizePathKey(join(realpathSync.native(parent), ...suffix));
+        } catch {
+          // Continue up to the first existing ancestor.
+        }
+      }
+    }
   }
   return normalizePathKey(path);
 }

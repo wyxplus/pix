@@ -30,7 +30,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Configuration regression failed' }
           pnpm --filter @pix/contracts exec vp test --run test/path-key.test.ts
           if ($LASTEXITCODE -ne 0) { throw 'Path regression failed' }
-          pnpm --filter @pix/desktop exec vp test --run --config vite.renderer.config.ts ../main/worktree-prune.test.ts ../main/host-park-policy.test.ts
+          pnpm --filter @pix/desktop exec vp test --run --config vite.renderer.config.ts ../main/worktree-prune.test.ts ../main/host-park-policy.test.ts ../sidecar/transport.test.ts
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 30
