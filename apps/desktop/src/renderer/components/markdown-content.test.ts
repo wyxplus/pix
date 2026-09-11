@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
+import { applyRuntimeEventToLiveStream, emptyLiveStream } from "../lib/live-stream.ts";
 import { MarkdownContent, normalizeLatexDelimiters } from "./MarkdownContent.tsx";
 
 function render(markdown: string, workspacePath?: string): string {
@@ -63,6 +64,31 @@ describe("MarkdownContent", () => {
     expect(html).toMatch(/text-align:\s*right|text-align:right/);
     // Must not fall back to raw pipe paragraphs.
     expect(html).not.toMatch(/<p>\| 类别 \|/);
+  });
+
+  it("renders a streamed table when adjacent columns have identical delimiter chunks", () => {
+    const chunks = [
+      "| 项目 | 数值 |\n",
+      "| --- ",
+      "| --- ",
+      "|\n",
+      "| 收入 | 1",
+      "0",
+      "0",
+      " |\n",
+      "| 支出 | 50 |",
+    ];
+    let state = emptyLiveStream();
+    chunks.forEach((delta, index) => {
+      state = applyRuntimeEventToLiveStream(state, { type: "message.delta", delta }, [], {
+        sequence: index + 1,
+      });
+    });
+    const item = state.items[0];
+    const html = render(item?.kind === "assistant" ? item.text : "");
+    expect(html).toContain('data-testid="markdown-table"');
+    expect(html).toContain("<td>100</td>");
+    expect(item?.kind === "assistant" && item.text).toBe(chunks.join(""));
   });
 
   it("renders LaTeX parenthesis and bracket delimiters", () => {
