@@ -1,3 +1,4 @@
+import { normalizePathKey } from "@pix/contracts";
 import {
   IPC_PROTOCOL_VERSION,
   type ExtensionUiResponse,
@@ -108,6 +109,7 @@ import { ensureProvisionedRuntimes } from "../main/runtime-provision.ts";
 import { augmentEnvPath } from "../main/shell-path.ts";
 import { ThemeLibrary } from "../main/theme-library.ts";
 import { SideChatLibrary } from "../main/side-chat-library.ts";
+import { pruneManagedWorktreesSafely, removeWorktreeSafely } from "../main/worktree-prune.ts";
 import { sideChatPrompt, SIDE_CHAT_SYSTEM_PROMPT } from "../main/side-chat.ts";
 
 /**
@@ -844,7 +846,7 @@ function applyBranchPrefix(name: string): string {
 }
 
 /** Remove oldest managed linked worktrees under root until count <= limit. Never removes main. */
-async function pruneManagedWorktrees(repoCwd: string): Promise<void> {
+async function pruneManagedWorktrees(repoCwd: string, createdPath: string): Promise<void> {
   const prefs = loadDesktopPrefs();
   // Default ON when unset; only skip when user explicitly disabled.
   if (prefs.worktreeAutoDelete === false) return;
@@ -853,36 +855,16 @@ async function pruneManagedWorktrees(repoCwd: string): Promise<void> {
     Number.isFinite(prefs.worktreeAutoDeleteLimit)
       ? Math.min(100, Math.max(1, Math.floor(prefs.worktreeAutoDeleteLimit)))
       : 10;
-  const root = normalizeRecentPathKey(resolveWorktreeRoot(repoCwd, prefs.worktreeRoot));
-  const items = await listGitWorktrees(repoCwd);
-  const managed = items
-    .filter((w) => !w.main && !w.bare)
-    .map((w) => ({
-      path: w.path,
-      key: normalizeRecentPathKey(w.path),
-    }))
-    .filter((w) => w.key === root || w.key.startsWith(`${root}/`));
-  if (managed.length <= limit) return;
-  // Prefer removing oldest by directory mtime when available.
-  const ranked = managed
-    .map((w) => {
-      let mtime = 0;
-      try {
-        mtime = lstatSync(w.path).mtimeMs;
-      } catch {
-        mtime = 0;
-      }
-      return { ...w, mtime };
-    })
-    .sort((a, b) => a.mtime - b.mtime);
-  const toRemove = ranked.slice(0, Math.max(0, ranked.length - limit));
-  for (const item of toRemove) {
-    try {
-      await runGit(repoCwd, ["worktree", "remove", "--force", item.path]);
-    } catch {
-      // best-effort
-    }
-  }
+  await pruneManagedWorktreesSafely({
+    repoCwd,
+    root: resolveWorktreeRoot(repoCwd, prefs.worktreeRoot),
+    limit,
+    protectedPaths: () => [
+      createdPath,
+      ...(supervisor?.workspaceCwds() ?? []),
+      ...(piTuiController?.workspaceCwds() ?? []),
+    ],
+  }).catch(() => undefined);
 }
 
 async function createGitWorktree(
@@ -909,7 +891,7 @@ async function createGitWorktree(
   args.push("-b", applyBranchPrefix(newBranchName), target);
   if (explicitStart) args.push(explicitStart);
   await runGit(cwd, args);
-  await pruneManagedWorktrees(cwd);
+  await pruneManagedWorktrees(cwd, target);
   // Surface in the sidebar project rail immediately (even before openPath).
   rememberWorkspace(target);
   return { path: target, context: readGitContext(target) };
@@ -939,7 +921,14 @@ async function removeGitWorktree(
     (cwdHint?.trim() && existsSync(cwdHint) ? cwdHint : undefined) ||
     ctx.mainWorktreePath ||
     targetRaw;
-  await runGit(gitCwd, ["worktree", "remove", "--force", targetRaw]);
+  await removeWorktreeSafely({
+    repoCwd: gitCwd,
+    path: targetRaw,
+    protectedPaths: () => [
+      ...(supervisor?.workspaceCwds() ?? []),
+      ...(piTuiController?.workspaceCwds() ?? []),
+    ],
+  });
   // Drop from recent rail if present.
   try {
     const prefs = loadDesktopPrefs();
@@ -1968,8 +1957,7 @@ function setAppScale(raw: unknown): number {
 }
 
 function normalizeRecentPathKey(path: string): string {
-  const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
-  return normalized.startsWith("/private/var/") ? normalized.slice("/private".length) : normalized;
+  return normalizePathKey(path);
 }
 
 function rememberWorkspace(cwd: string): void {
@@ -2187,11 +2175,11 @@ async function applyAppSessionProxy(channel?: ProxyChannelPrefs): Promise<void> 
 }
 
 function normalizeHostCwd(path: string): string {
-  return path.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+  return normalizePathKey(path);
 }
 
 function normalizeSessionKey(path: string): string {
-  return path.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+  return normalizePathKey(path);
 }
 
 function sessionKeyFromSnapshot(snapshot: HostSnapshot | undefined): string | undefined {
@@ -2499,6 +2487,15 @@ class HostSupervisor {
 
   getWorkspaceCwd(): string | undefined {
     return this.#workspaceCwd;
+  }
+
+  /** All attached hosts, including idle/busy parked sessions, protect their cwd. */
+  workspaceCwds(): string[] {
+    return [
+      this.#workspaceCwd,
+      this.#snapshot?.cwd,
+      ...[...this.#parked.values()].flatMap((parked) => [parked.workspaceCwd, parked.snapshot.cwd]),
+    ].filter((path): path is string => Boolean(path));
   }
 
   removeRecentWorkspace(cwd: string): string[] {
@@ -4931,7 +4928,7 @@ void (async () => {
   rpc.handle("pix:session:list", () => supervisor?.listSessions());
   rpc.handle("pix:session:list-for-cwd", async (_event, cwd: string) => {
     if (typeof cwd !== "string" || !cwd.trim()) return [];
-    const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+    const norm = normalizePathKey;
     const requested = norm(cwd);
     // When this cwd is the live host workspace, prefer host listSessions — it merges
     // the in-memory session that pi has not flushed to disk yet (no assistant msg).

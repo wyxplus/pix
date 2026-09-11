@@ -1,3 +1,4 @@
+import { normalizePathKey } from "@pix/contracts";
 /**
  * Embedded pi TUI — ghostty-web + main-process node-pty (`pi --session`).
  *
@@ -198,9 +199,7 @@ function stripPiEditorCursorStyle(data: string): string {
 
 /** Match main-process normalizeSessionKey (incl. macOS /private/var collapse). */
 function normSession(path: string): string {
-  let p = path.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
-  if (p.startsWith("/private/")) p = p.slice("/private".length);
-  return p;
+  return normalizePathKey(path);
 }
 
 /**

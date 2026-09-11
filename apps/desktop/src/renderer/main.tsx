@@ -1,3 +1,4 @@
+import { normalizePathKey } from "@pix/contracts";
 import "../desktop/api.ts";
 import { IPC_PROTOCOL_VERSION } from "@pix/contracts";
 import type {
@@ -328,9 +329,7 @@ function App() {
   const transitionSessionRef = useRef<string | null>(null);
   /** Match main-process session keys (macOS /private/var collapse). */
   function normSessionPath(path: string): string {
-    let p = path.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
-    if (p.startsWith("/private/")) p = p.slice("/private".length);
-    return p;
+    return normalizePathKey(path);
   }
 
   /**

@@ -24,6 +24,13 @@ jobs:
         run: pnpm --filter @pix/agent-runtime exec vp test --run test/platform-tools.test.ts
       - name: Verify Windows paths, Node CLI shims and external terminal launch
         run: pnpm --filter @pix/desktop exec vp test --run --config vite.renderer.config.ts ../main/shell-path.test.ts ../main/node-cli-launch.test.ts ../main/windows-terminal.test.ts
+      - name: Verify configuration persistence and worktree data protection on Windows
+        run: |
+          pnpm --filter @pix/agent-runtime exec vp test --run test/auth-json.test.ts test/models-json.test.ts test/provider-base-url.test.ts
+          if ($LASTEXITCODE -ne 0) { throw 'Configuration regression failed' }
+          pnpm --filter @pix/contracts exec vp test --run test/path-key.test.ts
+          if ($LASTEXITCODE -ne 0) { throw 'Path regression failed' }
+          pnpm --filter @pix/desktop exec vp test --run --config vite.renderer.config.ts ../main/worktree-prune.test.ts ../main/host-park-policy.test.ts
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 30

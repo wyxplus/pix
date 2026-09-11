@@ -9,39 +9,13 @@
  * Format matches pi docs/providers.md:
  *   { "provider": { "type": "api_key", "key": "..." } }
  */
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { updateJsonFile } from "./json-file.ts";
 
 const AUTH_FILE = "auth.json";
 
 export function authJsonPath(agentDir: string): string {
   return join(agentDir, AUTH_FILE);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-async function readAuthFile(path: string): Promise<Record<string, unknown>> {
-  try {
-    const raw = await readFile(path, "utf8");
-    const parsed: unknown = JSON.parse(raw);
-    return isRecord(parsed) ? { ...parsed } : {};
-  } catch {
-    return {};
-  }
-}
-
-async function writeAuthFile(path: string, data: Record<string, unknown>): Promise<void> {
-  await writeFile(path, `${JSON.stringify(data, null, 2)}\n`, {
-    encoding: "utf8",
-    mode: 0o600,
-  });
-  try {
-    await chmod(path, 0o600);
-  } catch {
-    // Windows may ignore mode; ignore chmod failures.
-  }
 }
 
 /** Write or replace a provider API key in auth.json (durable). */
@@ -55,11 +29,19 @@ export async function persistProviderApiKey(
   if (!providerId) throw new Error("Provider is required");
   if (!key) throw new Error("API key is required");
 
-  await mkdir(agentDir, { recursive: true });
-  const path = authJsonPath(agentDir);
-  const data = await readAuthFile(path);
-  data[providerId] = { type: "api_key", key };
-  await writeAuthFile(path, data);
+  await updateJsonFile(
+    authJsonPath(agentDir),
+    () => ({}),
+    (data) => {
+      Object.defineProperty(data, providerId, {
+        value: { type: "api_key", key },
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
+      return true;
+    },
+  );
 }
 
 /** Remove a provider credential from auth.json (if present). */
@@ -67,9 +49,13 @@ export async function deleteProviderCredential(agentDir: string, provider: strin
   const providerId = provider.trim();
   if (!providerId) return;
 
-  const path = authJsonPath(agentDir);
-  const data = await readAuthFile(path);
-  if (!(providerId in data)) return;
-  delete data[providerId];
-  await writeAuthFile(path, data);
+  await updateJsonFile(
+    authJsonPath(agentDir),
+    () => ({}),
+    (data) => {
+      if (!Object.hasOwn(data, providerId)) return false;
+      delete data[providerId];
+      return true;
+    },
+  );
 }

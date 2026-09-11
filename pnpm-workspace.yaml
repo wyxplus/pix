@@ -39,6 +39,8 @@ catalog:
   cmdk: ^1.1.1
   node-pty: ^1.1.0
   ghostty-web: 0.4.0
+  proper-lockfile: 4.1.2
+  "@types/proper-lockfile": ^4.1.4
 
 overrides:
   vite: "catalog:"

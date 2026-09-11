@@ -1,3 +1,4 @@
+import { normalizePathKey } from "@pix/contracts";
 /** Desktop-only project chrome prefs (pin / archive / rename / expand). */
 
 const PINNED_KEY = "pix.projects.pinned";
@@ -444,8 +445,7 @@ export function loadUnreadThreads(): string[] {
 
 /** Normalize session id / path so unread matches either form. */
 export function normalizeThreadKey(raw: string | undefined | null): string {
-  if (!raw) return "";
-  return raw.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+  return normalizePathKey(raw);
 }
 
 /** Unread identity keys for a thread (id + session file path). */

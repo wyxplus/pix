@@ -16,6 +16,77 @@ async function tempAgentDir(): Promise<string> {
 }
 
 describe("models.json helpers", () => {
+  it("keeps concurrent model additions and rejects a rename into an existing ID", async () => {
+    const agentDir = await tempAgentDir();
+    const input = {
+      provider: "source",
+      baseUrl: "https://gateway.invalid/v1",
+      api: "openai-completions" as const,
+    };
+    await Promise.all(
+      ["first", "second", "third"].map((modelId) =>
+        upsertCustomProviderInModelsJson(agentDir, { ...input, modelId }),
+      ),
+    );
+    expect(
+      (await readModelsJsonConfig(agentDir)).providers[0]?.models.map((row) => row.id).sort(),
+    ).toEqual(["first", "second", "third"]);
+    const before = await readFile(join(agentDir, "models.json"), "utf8");
+    await expect(
+      upsertCustomProviderInModelsJson(agentDir, {
+        ...input,
+        modelId: "second",
+        previousProvider: "source",
+        previousModelId: "first",
+      }),
+    ).rejects.toThrow(/already exists/);
+    expect(await readFile(join(agentDir, "models.json"), "utf8")).toBe(before);
+  });
+
+  it.each([false, true])(
+    "preserves compatibility and hidden fields while renaming (has sibling: %s)",
+    async (sibling) => {
+      const agentDir = await tempAgentDir();
+      const model = {
+        id: "old",
+        name: "Existing",
+        reasoning: true,
+        contextWindow: 64000,
+        maxTokens: 8192,
+        input: ["text", "image"],
+        cost: { input: 2, output: 3 },
+        compat: { thinkingFormat: "qwen" },
+        headers: { "X-Model": "fixture" },
+      };
+      const provider = {
+        api: "openai-completions",
+        baseUrl: "https://gateway.invalid/v1",
+        compat: { supportsDeveloperRole: false },
+        headers: { "X-Tenant": "fixture" },
+        models: [model, ...(sibling ? [{ id: "sibling" }] : [])],
+      };
+      await writeFile(
+        join(agentDir, "models.json"),
+        JSON.stringify({ providers: { source: provider } }),
+      );
+      await upsertCustomProviderInModelsJson(agentDir, {
+        provider: "source",
+        previousProvider: "source",
+        previousModelId: "old",
+        modelId: "new",
+        baseUrl: provider.baseUrl,
+        api: "openai-completions",
+      });
+      const data = JSON.parse(await readFile(join(agentDir, "models.json"), "utf8"));
+      expect(data.providers.source.compat).toEqual(provider.compat);
+      expect(data.providers.source.headers["X-Tenant"]).toBe("fixture");
+      expect(data.providers.source.models[0]).toEqual({ ...model, id: "new" });
+      expect(data.providers.source.models.map((row: { id: string }) => row.id)).toEqual(
+        sibling ? ["new", "sibling"] : ["new"],
+      );
+    },
+  );
+
   it("removes one model while preserving its provider and remaining models", async () => {
     const agentDir = await tempAgentDir();
     const input = {

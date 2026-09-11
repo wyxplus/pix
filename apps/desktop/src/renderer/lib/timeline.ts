@@ -10,7 +10,7 @@ export type ThreadRunState =
   | "crashed"
   | "recovering";
 
-export type TimelineItem =
+export type TimelineItem = { messageId?: string } & (
   | {
       id: string;
       kind: "user";
@@ -55,7 +55,8 @@ export type TimelineItem =
       timestamp?: string;
       /** True when projected from extension custom message/entry (generic fallback). */
       extension?: boolean;
-    };
+    }
+);
 
 /**
  * Live / process-header activity (Codex + pi TUI parity).

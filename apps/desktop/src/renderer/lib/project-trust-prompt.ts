@@ -1,3 +1,4 @@
+import { normalizePathKey } from "@pix/contracts";
 /**
  * When to show the view-mode project trust dialog.
  * Terminal mode leaves prompting to embedded pi TUI.
@@ -24,7 +25,7 @@ export type ProjectTrustPromptInput = {
 
 /** Stable key for dismiss map / de-dupe (slash + case). */
 export function projectTrustPromptKey(cwd: string): string {
-  return cwd.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+  return normalizePathKey(cwd);
 }
 
 /**

@@ -502,9 +502,10 @@ const messages = {
     "project.createWorktreeFailed": "创建工作树失败",
     "project.createWorktreeLoadingBases": "加载分支…",
     "worktree.autoDelete": "自动删除工作树",
-    "worktree.autoDeleteHint": "超出数量上限时自动清理最旧的受管工作树（不会删除主工作树）",
+    "worktree.autoDeleteHint":
+      "超限时清理最旧的空闲工作树；保留有本地文件、被锁定或仍在使用的工作树",
     "worktree.autoDeleteLimit": "自动删除数量限制",
-    "worktree.autoDeleteLimitHint": "保留的最近工作树数量（1–100）",
+    "worktree.autoDeleteLimitHint": "目标保留数量（1–100）；无法安全清理时允许暂时超限",
     "worktree.save": "保存",
     "worktree.saving": "保存中…",
     "worktree.saved": "工作树设置已保存",
@@ -1792,9 +1793,10 @@ const messages = {
     "project.createWorktreeLoadingBases": "Loading branches…",
     "worktree.autoDelete": "Auto-delete worktrees",
     "worktree.autoDeleteHint":
-      "When over the limit, remove the oldest managed worktrees (never the main tree)",
+      "Remove the oldest idle worktrees when over the limit; keep those with local files, locks or attached sessions",
     "worktree.autoDeleteLimit": "Auto-delete limit",
-    "worktree.autoDeleteLimitHint": "How many recent worktrees to keep (1–100)",
+    "worktree.autoDeleteLimitHint":
+      "Target count (1–100); may be exceeded when no worktree can be safely removed",
     "worktree.save": "Save",
     "worktree.saving": "Saving…",
     "worktree.saved": "Worktree settings saved",

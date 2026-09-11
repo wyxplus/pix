@@ -302,10 +302,10 @@ export interface HostSnapshot {
 
 export type RuntimeEvent =
   | { type: "agent.started" | "agent.settled" }
-  | { type: "user.message"; content: string }
+  | { type: "user.message"; content: string; messageId?: string }
   | { type: "queue.updated"; steering: string[]; followUp: string[] }
-  | { type: "message.delta"; delta: string }
-  | { type: "thinking.delta"; delta: string }
+  | { type: "message.delta"; delta: string; messageId?: string }
+  | { type: "thinking.delta"; delta: string; messageId?: string }
   | { type: "message.completed"; reason: "stop" | "length" | "toolUse" }
   /**
    * Non-success assistant stop reasons from pi (`StopReason` minus completed ones).
@@ -436,6 +436,9 @@ export type SessionImage =
 export interface SessionHistoryMessage {
   role: "user" | "assistant" | "thinking" | "tool" | "system" | "shell";
   text: string;
+  /** Runtime identity of the source message segment, when projected by a live Host. */
+  messageId?: string;
+  toolCallId?: string;
   toolName?: string;
   isError?: boolean;
   command?: string;
@@ -2599,6 +2602,7 @@ function isHostSnapshot(value: unknown): value is HostSnapshot {
 
 function isRuntimeEvent(value: unknown): value is RuntimeEvent {
   if (!isRecord(value) || typeof value.type !== "string") return false;
+  if (value.messageId !== undefined && typeof value.messageId !== "string") return false;
   switch (value.type) {
     case "agent.started":
     case "agent.settled":
@@ -2869,6 +2873,8 @@ function isSessionThreadSummary(value: unknown): value is SessionThreadSummary {
 
 function isSessionHistoryMessage(value: unknown): value is SessionHistoryMessage {
   if (!isRecord(value) || typeof value.text !== "string") return false;
+  if (value.messageId !== undefined && typeof value.messageId !== "string") return false;
+  if (value.toolCallId !== undefined && typeof value.toolCallId !== "string") return false;
   if (!["user", "assistant", "thinking", "tool", "system", "shell"].includes(String(value.role))) {
     return false;
   }
@@ -3208,3 +3214,4 @@ function isPiSettingsView(value: unknown): value is PiSettingsView {
     (value.theme === undefined || typeof value.theme === "string")
   );
 }
+export { normalizePathKey, type PathPlatform } from "./path-key.ts";

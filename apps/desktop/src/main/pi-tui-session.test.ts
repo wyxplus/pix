@@ -32,11 +32,14 @@ describe("pi-tui-session", () => {
     expect(normalizeSessionKey("C:\\a\\b.jsonl")).toBe(normalizeSessionKey("C:/a/b.jsonl"));
   });
 
-  it("collapses macOS /private firmlink so park keys match across hops", () => {
-    expect(normalizeSessionKey("/private/var/folders/xx/s.jsonl")).toBe(
-      normalizeSessionKey("/var/folders/xx/s.jsonl"),
-    );
-  });
+  it.skipIf(process.platform !== "darwin")(
+    "collapses macOS /private firmlink so park keys match across hops",
+    () => {
+      expect(normalizeSessionKey("/private/var/folders/xx/s.jsonl")).toBe(
+        normalizeSessionKey("/var/folders/xx/s.jsonl"),
+      );
+    },
+  );
 
   it("enforces mutual exclusion: one TUI owner, host prompt blocked while active", () => {
     const guard = new PiTuiExclusiveGuard();

@@ -4,13 +4,24 @@
  */
 
 /** Cap idle parked hosts. Busy parks are never evicted to make room. */
+import { normalizePathKey } from "@pix/contracts";
+import { realpathSync } from "node:fs";
+
 export const MAX_PARKED_HOSTS = 5;
 
 /** Idle parked hosts are reaped after this TTL so warm reuse stays bounded. */
 export const PARKED_IDLE_TTL_MS = 10 * 60 * 1000;
 
 export function normalizeHostCwdKey(path: string): string {
-  return path.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+  if (!path.trim()) return "";
+  try {
+    // Resolve existing filesystem aliases before comparing, while preserving
+    // case for distinct POSIX directories. Never probe by writing to a volume.
+    return normalizePathKey(realpathSync.native(path));
+  } catch {
+    // Missing/imported paths still have a stable platform-aware spelling.
+  }
+  return normalizePathKey(path);
 }
 
 export type ParkedHostRef = {

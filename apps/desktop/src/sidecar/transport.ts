@@ -75,6 +75,11 @@ async function stop() {
   try {
     await shutdown();
   } finally {
+    // Pipes are asynchronous on POSIX. process.exit() can otherwise truncate a
+    // queued JSON frame (large model catalogs/history are larger than a pipe).
+    if (!process.stdout.destroyed) {
+      await new Promise<void>((resolve) => process.stdout.end(resolve));
+    }
     process.exit(0);
   }
 }

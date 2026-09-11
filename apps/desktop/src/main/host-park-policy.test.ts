@@ -21,6 +21,14 @@ function ref(partial: Partial<ParkedHostRef> & { sessionKey: string }): ParkedHo
 }
 
 describe("host-park-policy", () => {
+  it.skipIf(process.platform === "win32")(
+    "does not promote another case-distinct workspace",
+    () => {
+      const parked = [ref({ sessionKey: "upper", workspaceCwd: "/home/fixture/Project" })];
+      expect(findParkedSessionKeyByCwd(parked, "/home/fixture/project")).toBeUndefined();
+      expect(findParkedSessionKeyByCwd(parked, "/home/fixture/Project")).toBe("upper");
+    },
+  );
   it("normalizes cwd keys across separators and trailing slashes", () => {
     expect(normalizeHostCwdKey("C:\\proj\\a\\")).toBe(normalizeHostCwdKey("C:/proj/a"));
   });

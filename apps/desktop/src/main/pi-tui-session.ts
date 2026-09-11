@@ -3,6 +3,8 @@
  * No PTY / Electron imports — unit-tested without native modules.
  */
 
+import { normalizePathKey } from "@pix/contracts";
+
 export type PiTuiOpenRequest = {
   /** Absolute path to the session JSONL file. */
   sessionFile: string;
@@ -29,11 +31,7 @@ export type PiTuiLaunchPlan = {
  * open works but switch/hop fails to match the parked PTY or exclusive guard.
  */
 export function normalizeSessionKey(sessionPath: string): string {
-  let p = sessionPath.replace(/\\/g, "/").replace(/\/+$/, "").trim().toLowerCase();
-  if (!p) return "";
-  // Collapse Apple firmlink prefix so /var/... === /private/var/...
-  if (p.startsWith("/private/")) p = p.slice("/private".length);
-  return p;
+  return normalizePathKey(sessionPath);
 }
 
 /** True when two session paths refer to the same JSONL (slash / case / /private). */

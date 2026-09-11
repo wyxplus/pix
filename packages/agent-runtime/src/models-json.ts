@@ -5,7 +5,7 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import type {
   CustomModelApi,
   ModelsJsonConfigView,
@@ -14,6 +14,7 @@ import type {
   UpsertCustomProviderInput,
 } from "@pix/contracts";
 import { normalizeProviderBaseUrl } from "./provider-base-url.ts";
+import { isRecord, parseJsonObject, updateJsonFile } from "./json-file.ts";
 
 const MODELS_FILE = "models.json";
 
@@ -31,11 +32,6 @@ export function defaultCustomProviderUserAgent(version?: string): string {
 
 /** @deprecated Prefer defaultCustomProviderUserAgent(appVersion). */
 export const DEFAULT_CUSTOM_PROVIDER_USER_AGENT = defaultCustomProviderUserAgent();
-
-const EMPTY_TEMPLATE = `{
-  "providers": {}
-}
-`;
 
 /** Full pi custom-provider API set (docs/custom-provider.md). */
 const CUSTOM_APIS = new Set<string>([
@@ -66,7 +62,7 @@ export function listModelsJsonProviderIds(agentDir: string): Set<string> {
   const path = modelsJsonPath(agentDir);
   if (!existsSync(path)) return new Set();
   try {
-    const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+    const parsed = parseJsonObject(readFileSync(path, "utf8"), MODELS_FILE);
     if (!isRecord(parsed) || !isRecord(parsed.providers)) return new Set();
     return new Set(
       Object.keys(parsed.providers)
@@ -82,13 +78,10 @@ async function fileExists(path: string): Promise<boolean> {
   try {
     await access(path);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function projectModel(raw: unknown): ModelsJsonModelView | undefined {
@@ -158,7 +151,7 @@ export async function readModelsJsonConfig(agentDir: string): Promise<ModelsJson
   }
   try {
     const text = await readFile(path, "utf8");
-    const parsed: unknown = JSON.parse(text);
+    const parsed = parseJsonObject(text, MODELS_FILE);
     if (!isRecord(parsed)) {
       return { path, exists: true, providers: [], error: "models.json root must be an object" };
     }
@@ -172,29 +165,21 @@ export async function readModelsJsonConfig(agentDir: string): Promise<ModelsJson
   }
 }
 
-async function loadRoot(path: string): Promise<Record<string, unknown>> {
-  if (!(await fileExists(path))) {
-    return { providers: {} };
-  }
-  const text = await readFile(path, "utf8");
-  const parsed: unknown = JSON.parse(text);
-  if (!isRecord(parsed)) throw new Error("models.json root must be an object");
-  return { ...parsed };
-}
-
 function asProvidersMap(root: Record<string, unknown>): Record<string, unknown> {
-  if (!isRecord(root.providers)) {
+  if (root.providers === undefined) {
     root.providers = {};
   }
+  if (!isRecord(root.providers)) throw new Error("models.json providers must be an object");
   return root.providers as Record<string, unknown>;
 }
 
 export async function ensureModelsJsonTemplate(agentDir: string): Promise<string> {
   const path = modelsJsonPath(agentDir);
-  await mkdir(agentDir, { recursive: true });
-  if (!(await fileExists(path))) {
-    await writeFile(path, EMPTY_TEMPLATE, "utf8");
-  }
+  await updateJsonFile(
+    path,
+    () => ({ providers: {} }),
+    (_root, exists) => !exists,
+  );
   return path;
 }
 
@@ -235,30 +220,31 @@ function removeModelFromProvidersMap(
  */
 export async function normalizeModelsJsonBaseUrls(agentDir: string): Promise<boolean> {
   const path = modelsJsonPath(agentDir);
-  if (!(await fileExists(path))) return false;
-  let root: Record<string, unknown>;
   try {
-    root = await loadRoot(path);
+    return await updateJsonFile(
+      path,
+      () => ({ providers: {} }),
+      (root, exists) => {
+        if (!exists) return false;
+        const providers = asProvidersMap(root);
+        let changed = false;
+        for (const [providerId, raw] of Object.entries(providers)) {
+          if (!isRecord(raw)) continue;
+          const baseUrl = typeof raw.baseUrl === "string" ? raw.baseUrl : "";
+          const api = typeof raw.api === "string" ? raw.api : "";
+          if (!baseUrl.trim() || !api.trim()) continue;
+          const next = normalizeProviderBaseUrl(baseUrl, api);
+          if (next !== baseUrl) {
+            providers[providerId] = { ...raw, baseUrl: next };
+            changed = true;
+          }
+        }
+        return changed;
+      },
+    );
   } catch {
     return false;
   }
-  const providers = asProvidersMap(root);
-  let changed = false;
-  for (const [providerId, raw] of Object.entries(providers)) {
-    if (!isRecord(raw)) continue;
-    const baseUrl = typeof raw.baseUrl === "string" ? raw.baseUrl : "";
-    const api = typeof raw.api === "string" ? raw.api : "";
-    if (!baseUrl.trim() || !api.trim()) continue;
-    const next = normalizeProviderBaseUrl(baseUrl, api);
-    if (next !== baseUrl) {
-      providers[providerId] = { ...raw, baseUrl: next };
-      changed = true;
-    }
-  }
-  if (!changed) return false;
-  root.providers = providers;
-  await writeFile(path, `${JSON.stringify(root, null, 2)}\n`, "utf8");
-  return true;
 }
 
 export async function upsertCustomProviderInModelsJson(
@@ -281,78 +267,117 @@ export async function upsertCustomProviderInModelsJson(
   }
 
   const path = modelsJsonPath(agentDir);
-  await mkdir(agentDir, { recursive: true });
-  const root = await loadRoot(path);
-  const providers = asProvidersMap(root);
+  await updateJsonFile(
+    path,
+    () => ({ providers: {} }),
+    (root) => {
+      const providers = asProvidersMap(root);
 
-  const previousProvider = input.previousProvider?.trim();
-  const previousModelId = input.previousModelId?.trim();
-  if (
-    previousProvider &&
-    previousModelId &&
-    (previousProvider !== providerId || previousModelId !== modelId)
-  ) {
-    removeModelFromProvidersMap(providers, previousProvider, previousModelId);
-  }
+      const previousProvider = input.previousProvider?.trim();
+      const previousModelId = input.previousModelId?.trim();
+      // Capture both source and destination before removing anything. An ID-only
+      // rename keeps the provider block and the source model's non-form fields.
+      const existing = isRecord(providers[providerId]) ? { ...providers[providerId] } : {};
+      const modelsArr = Array.isArray(existing.models) ? [...existing.models] : [];
+      const sourceProvider = previousProvider ? providers[previousProvider] : undefined;
+      const source =
+        isRecord(sourceProvider) && Array.isArray(sourceProvider.models)
+          ? sourceProvider.models.find((row) => isRecord(row) && row.id === previousModelId)
+          : undefined;
+      const destination = modelsArr.find((row) => isRecord(row) && row.id === modelId);
+      const moving = Boolean(
+        previousProvider &&
+        previousModelId &&
+        (previousProvider !== providerId || previousModelId !== modelId),
+      );
+      if (moving && source && destination)
+        throw new Error("A model with this ID already exists in the destination provider");
+      const prior = isRecord(source) ? source : isRecord(destination) ? destination : {};
+      if (previousProvider && previousModelId && previousProvider !== providerId) {
+        removeModelFromProvidersMap(providers, previousProvider, previousModelId);
+      }
 
-  const existing = isRecord(providers[providerId]) ? { ...providers[providerId] } : {};
-  const modelsArr = Array.isArray(existing.models) ? [...existing.models] : [];
-  const modelEntry: Record<string, unknown> = {
-    id: modelId,
-    name: input.modelName?.trim() || modelId,
-    reasoning: Boolean(input.reasoning),
-    input: input.input === "text-image" ? ["text", "image"] : ["text"],
-    contextWindow: positiveInt(input.contextWindow, DEFAULT_CONTEXT_WINDOW),
-    maxTokens: positiveInt(input.maxTokens, DEFAULT_MAX_TOKENS),
-    cost: {
-      input: nonNegNumber(input.costInput),
-      output: nonNegNumber(input.costOutput),
-      cacheRead: nonNegNumber(input.costCacheRead),
-      cacheWrite: nonNegNumber(input.costCacheWrite),
+      const priorCost = isRecord(prior.cost) ? prior.cost : {};
+      const cost = { ...priorCost };
+      for (const [field, value] of Object.entries({
+        input: input.costInput,
+        output: input.costOutput,
+        cacheRead: input.costCacheRead,
+        cacheWrite: input.costCacheWrite,
+      })) {
+        if (value !== undefined || !isRecord(prior.cost)) cost[field] = nonNegNumber(value);
+      }
+      const modelEntry: Record<string, unknown> = {
+        ...prior,
+        id: modelId,
+        name:
+          input.modelName !== undefined
+            ? input.modelName.trim() || modelId
+            : (prior.name ?? modelId),
+        reasoning: input.reasoning ?? prior.reasoning ?? false,
+        input:
+          input.input !== undefined
+            ? input.input === "text-image"
+              ? ["text", "image"]
+              : ["text"]
+            : (prior.input ?? ["text"]),
+        contextWindow: positiveInt(
+          input.contextWindow,
+          typeof prior.contextWindow === "number" ? prior.contextWindow : DEFAULT_CONTEXT_WINDOW,
+        ),
+        maxTokens: positiveInt(
+          input.maxTokens,
+          typeof prior.maxTokens === "number" ? prior.maxTokens : DEFAULT_MAX_TOKENS,
+        ),
+        cost,
+      };
+
+      let replaced = false;
+      const nextModels = modelsArr.map((item) => {
+        if (
+          isRecord(item) &&
+          (item.id === modelId || (previousProvider === providerId && item.id === previousModelId))
+        ) {
+          replaced = true;
+          return { ...item, ...modelEntry };
+        }
+        return item;
+      });
+      if (!replaced) nextModels.push(modelEntry);
+
+      const providerBlock: Record<string, unknown> = {
+        ...existing,
+        baseUrl,
+        api: input.api as CustomModelApi,
+        models: nextModels,
+      };
+      if (input.authHeader === true) {
+        providerBlock.authHeader = true;
+      } else if (input.authHeader === false) {
+        delete providerBlock.authHeader;
+      }
+
+      // User-Agent: form value, else keep existing, else product default (avoid OpenAI/JS 403s).
+      const existingHeaders = isRecord(existing.headers)
+        ? { ...(existing.headers as Record<string, unknown>) }
+        : {};
+      let previousUa = "";
+      for (const [key, value] of Object.entries(existingHeaders)) {
+        if (key.toLowerCase() === "user-agent") {
+          if (!previousUa && typeof value === "string") previousUa = value.trim();
+          delete existingHeaders[key];
+        }
+      }
+      const ua = input.userAgent?.trim() || previousUa || defaultCustomProviderUserAgent();
+      existingHeaders["User-Agent"] = ua;
+      providerBlock.headers = existingHeaders;
+
+      providers[providerId] = providerBlock;
+      root.providers = providers;
+
+      return true;
     },
-  };
-
-  let replaced = false;
-  const nextModels = modelsArr.map((item) => {
-    if (isRecord(item) && item.id === modelId) {
-      replaced = true;
-      return { ...item, ...modelEntry };
-    }
-    return item;
-  });
-  if (!replaced) nextModels.push(modelEntry);
-
-  const providerBlock: Record<string, unknown> = {
-    ...existing,
-    baseUrl,
-    api: input.api as CustomModelApi,
-    models: nextModels,
-  };
-  if (input.authHeader === true) {
-    providerBlock.authHeader = true;
-  } else if (input.authHeader === false) {
-    delete providerBlock.authHeader;
-  }
-
-  // User-Agent: form value, else keep existing, else product default (avoid OpenAI/JS 403s).
-  const existingHeaders = isRecord(existing.headers)
-    ? { ...(existing.headers as Record<string, unknown>) }
-    : {};
-  let previousUa = "";
-  for (const [key, value] of Object.entries(existingHeaders)) {
-    if (key.toLowerCase() === "user-agent") {
-      if (!previousUa && typeof value === "string") previousUa = value.trim();
-      delete existingHeaders[key];
-    }
-  }
-  const ua = input.userAgent?.trim() || previousUa || defaultCustomProviderUserAgent();
-  existingHeaders["User-Agent"] = ua;
-  providerBlock.headers = existingHeaders;
-
-  providers[providerId] = providerBlock;
-  root.providers = providers;
-
-  await writeFile(path, `${JSON.stringify(root, null, 2)}\n`, "utf8");
+  );
   return readModelsJsonConfig(agentDir);
 }
 
@@ -363,17 +388,17 @@ export async function removeCustomProviderFromModelsJson(
   const providerId = provider.trim();
   if (!providerId) throw new Error("Provider is required");
   const path = modelsJsonPath(agentDir);
-  if (!(await fileExists(path))) {
-    return { path, exists: false, providers: [] };
-  }
-  const root = await loadRoot(path);
-  const providers = asProvidersMap(root);
-  if (!(providerId in providers)) {
-    return readModelsJsonConfig(agentDir);
-  }
-  delete providers[providerId];
-  root.providers = providers;
-  await writeFile(path, `${JSON.stringify(root, null, 2)}\n`, "utf8");
+  await updateJsonFile(
+    path,
+    () => ({ providers: {} }),
+    (root, exists) => {
+      if (!exists) return false;
+      const providers = asProvidersMap(root);
+      if (!Object.hasOwn(providers, providerId)) return false;
+      delete providers[providerId];
+      return true;
+    },
+  );
   return readModelsJsonConfig(agentDir);
 }
 
@@ -387,13 +412,14 @@ export async function removeCustomModelFromModelsJson(
   const id = modelId.trim();
   if (!providerId || !id) throw new Error("Provider and model id are required");
   const path = modelsJsonPath(agentDir);
-  if (!(await fileExists(path))) {
-    return { path, exists: false, providers: [] };
-  }
-  const root = await loadRoot(path);
-  const providers = asProvidersMap(root);
-  removeModelFromProvidersMap(providers, providerId, id);
-  root.providers = providers;
-  await writeFile(path, `${JSON.stringify(root, null, 2)}\n`, "utf8");
+  await updateJsonFile(
+    path,
+    () => ({ providers: {} }),
+    (root, exists) => {
+      if (!exists) return false;
+      removeModelFromProvidersMap(asProvidersMap(root), providerId, id);
+      return true;
+    },
+  );
   return readModelsJsonConfig(agentDir);
 }

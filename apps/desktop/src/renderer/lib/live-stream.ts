@@ -19,6 +19,9 @@ export type LiveStreamState = {
   promptIndex: number;
   /** Host event sequences already folded into this log. */
   seenSequences: number[];
+  /** Completed sources already included in a history snapshot. */
+  coveredMessageIds?: string[];
+  coveredToolCallIds?: string[];
 };
 
 export function emptyLiveStream(): LiveStreamState {
@@ -29,25 +32,33 @@ export function resetLiveStream(): LiveStreamState {
   return emptyLiveStream();
 }
 
-function sameOrPrefix(a: string, b: string): boolean {
-  if (!b) return Boolean(a);
-  return a === b || a.startsWith(b) || b.startsWith(a);
-}
-
 function historyCoversLiveItem(history: SessionHistoryMessage[], item: TimelineItem): boolean {
   if (item.kind === "user" || item.kind === "assistant" || item.kind === "thinking") {
-    return history.some((row) => row.role === item.kind && sameOrPrefix(row.text, item.text));
+    // A previous turn with identical text (or a shorter prefix) proves nothing.
+    return Boolean(
+      item.messageId &&
+      history.some(
+        (row) =>
+          row.role === item.kind &&
+          row.messageId === item.messageId &&
+          row.text.trim().startsWith(item.text.trim()),
+      ),
+    );
   }
   if (item.kind === "tool") {
-    if (item.status === "running") return false;
     return history.some((row) => {
       if (row.role !== "tool") return false;
-      if (item.toolName && row.toolName && item.toolName === row.toolName) return true;
-      return Boolean(item.toolCallId && row.text.includes(item.toolCallId));
+      return Boolean(item.toolCallId && row.toolCallId === item.toolCallId);
     });
   }
   if (item.kind === "system") {
-    return history.some((row) => row.role === "system" && row.text === item.text);
+    return Boolean(
+      item.messageId &&
+      history.some(
+        (row) =>
+          row.role === "system" && row.messageId === item.messageId && row.text === item.text,
+      ),
+    );
   }
   return false;
 }
@@ -60,8 +71,27 @@ export function liveStreamNotCoveredByHistory(
   stream: LiveStreamState,
   history: SessionHistoryMessage[],
 ): LiveStreamState {
-  if (stream.items.length === 0 || history.length === 0) return stream;
-  return { ...stream, items: stream.items.filter((item) => !historyCoversLiveItem(history, item)) };
+  if (history.length === 0) return stream;
+  const items = stream.items.filter((item) => !historyCoversLiveItem(history, item));
+  const uncovered = new Set(items.map((item) => item.messageId).filter(Boolean));
+  return {
+    ...stream,
+    items,
+    coveredMessageIds: [
+      ...new Set([
+        ...(stream.coveredMessageIds ?? []),
+        ...history.flatMap((row) =>
+          row.messageId && !uncovered.has(row.messageId) ? [row.messageId] : [],
+        ),
+      ]),
+    ].slice(-SEEN_SEQUENCE_CAP),
+    coveredToolCallIds: [
+      ...new Set([
+        ...(stream.coveredToolCallIds ?? []),
+        ...history.flatMap((row) => (row.toolCallId ? [row.toolCallId] : [])),
+      ]),
+    ].slice(-SEEN_SEQUENCE_CAP),
+  };
 }
 
 /**
@@ -132,12 +162,19 @@ export function applyRuntimeEventToLiveStream(
     seenSequences: rememberSequence(next, sequence),
   });
 
+  // A snapshot can overtake IPC events. Delayed deltas must not recreate a
+  // message whose completed source has already been included in history.
+  if ("messageId" in event && event.messageId && state.coveredMessageIds?.includes(event.messageId))
+    return mark(state);
+  if ("toolCallId" in event && state.coveredToolCallIds?.includes(event.toolCallId))
+    return mark(state);
+
   switch (event.type) {
     case "thinking.delta": {
       if (!event.delta) return mark(state);
       const items = state.items.slice();
       const last = items[items.length - 1];
-      if (last?.kind === "thinking") {
+      if (last?.kind === "thinking" && last.messageId === event.messageId) {
         const text = appendMonotonicText(last.text, event.delta);
         if (text === last.text) return mark(state);
         // Keep original timestamp = when this thinking segment started.
@@ -145,21 +182,33 @@ export function applyRuntimeEventToLiveStream(
         return mark({ ...state, items });
       }
       const { id, seq } = nextId(state, "thinking");
-      items.push({ id, kind: "thinking", text: event.delta, timestamp: nowIso() });
+      items.push({
+        id,
+        kind: "thinking",
+        text: event.delta,
+        timestamp: nowIso(),
+        ...(event.messageId ? { messageId: event.messageId } : {}),
+      });
       return mark({ ...state, items, seq });
     }
     case "message.delta": {
       if (!event.delta) return mark(state);
       const items = state.items.slice();
       const last = items[items.length - 1];
-      if (last?.kind === "assistant") {
+      if (last?.kind === "assistant" && last.messageId === event.messageId) {
         const text = appendMonotonicText(last.text, event.delta);
         if (text === last.text) return mark(state);
         items[items.length - 1] = { ...last, text };
         return mark({ ...state, items });
       }
       const { id, seq } = nextId(state, "assistant");
-      items.push({ id, kind: "assistant", text: event.delta, timestamp: nowIso() });
+      items.push({
+        id,
+        kind: "assistant",
+        text: event.delta,
+        timestamp: nowIso(),
+        ...(event.messageId ? { messageId: event.messageId } : {}),
+      });
       return mark({ ...state, items, seq });
     }
     case "user.message": {
@@ -172,17 +221,22 @@ export function applyRuntimeEventToLiveStream(
       // Optimistic send may already have appended this user row (same display text).
       // Merge attachment paths from host echo so chips aren't dropped on dedupe.
       const last = state.items[state.items.length - 1];
-      if (last?.kind === "user" && last.text === prompt) {
-        if (source.paths.length === 0) {
-          return mark({ ...state, promptIndex });
-        }
+      if (
+        last?.kind === "user" &&
+        last.text === prompt &&
+        (!last.messageId || last.messageId === event.messageId)
+      ) {
         const merged = mergeAttachmentPaths(last.attachments, source.paths);
         const same =
           merged.length === (last.attachments?.length ?? 0) &&
           merged.every((path, index) => last.attachments?.[index] === path);
-        if (same) return mark({ ...state, promptIndex });
+        if (same && last.messageId === event.messageId) return mark({ ...state, promptIndex });
         const items = state.items.slice();
-        items[items.length - 1] = { ...last, attachments: merged };
+        items[items.length - 1] = {
+          ...last,
+          attachments: merged,
+          ...(event.messageId ? { messageId: event.messageId } : {}),
+        };
         return mark({ ...state, items, promptIndex });
       }
       const { id, seq } = nextId(state, "user");
@@ -191,6 +245,7 @@ export function applyRuntimeEventToLiveStream(
         kind: "user",
         text: prompt,
         timestamp: nowIso(),
+        ...(event.messageId ? { messageId: event.messageId } : {}),
         ...(source.paths.length > 0 ? { attachments: source.paths } : {}),
       };
       return mark({

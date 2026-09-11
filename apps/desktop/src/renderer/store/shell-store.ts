@@ -1,3 +1,4 @@
+import { normalizePathKey } from "@pix/contracts";
 /**
  * Short-lived UI projection store.
  * Host snapshots/events and pi JSONL remain the authority — this store must not
@@ -298,12 +299,7 @@ export type RuntimeEventDelivery = "accept" | "duplicate" | "gap" | "stale-runti
  * host snapshots, sidebar rows, and TUI realpaths all hit the same marker entry.
  */
 export function sessionRunKey(raw: string | undefined | null): string {
-  if (!raw) return "";
-  let p = raw.replace(/\\/g, "/").replace(/\/+$/, "").trim().toLowerCase();
-  if (!p) return "";
-  // Apple firmlink: /var is a symlink to /private/var.
-  if (p.startsWith("/private/")) p = p.slice("/private".length);
-  return p;
+  return normalizePathKey(raw);
 }
 
 export function sessionKeyFromSnapshot(
@@ -871,9 +867,10 @@ export const useShellStore = create<ShellState>((set, get) => ({
       const incoming =
         key && prevKey === key ? state.liveStream : key ? backgroundLiveStreams[key] : undefined;
       if (key) delete backgroundLiveStreams[key];
-      const liveStream = incoming
-        ? liveStreamNotCoveredByHistory(incoming, input.history)
-        : emptyLiveStream();
+      const liveStream = liveStreamNotCoveredByHistory(
+        incoming ?? emptyLiveStream(),
+        input.history,
+      );
       return {
         snapshot: input.snapshot,
         runtimeId: input.snapshot.runtimeId,

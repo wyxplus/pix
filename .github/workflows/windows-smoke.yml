@@ -3,8 +3,8 @@ on:
   workflow_dispatch:
     inputs:
       release_run_id:
-        description: Release workflow run containing the Windows installer to test
-        required: true
+        description: Optional release run to test; leave empty to build this ref without publishing
+        required: false
         type: string
 permissions:
   contents: read
@@ -12,7 +12,7 @@ permissions:
 jobs:
   smoke:
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -23,7 +23,26 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - uses: dtolnay/rust-toolchain@stable
+        if: inputs.release_run_id == ''
+      - uses: Swatinem/rust-cache@v2
+        if: inputs.release_run_id == ''
+        with:
+          workspaces: apps/desktop/src-tauri
+      - name: Build this revision for installation testing
+        if: inputs.release_run_id == ''
+        shell: pwsh
+        run: |
+          pnpm build
+          if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
+          pnpm --filter @pix/desktop exec node scripts/prepare-sidecar.mjs --release
+          if ($LASTEXITCODE -ne 0) { throw 'Sidecar staging failed' }
+          pnpm --filter @pix/desktop exec tauri build --bundles nsis
+          if ($LASTEXITCODE -ne 0) { throw 'Windows packaging failed' }
+          New-Item -ItemType Directory -Path installer -Force | Out-Null
+          Copy-Item apps/desktop/src-tauri/target/release/bundle/nsis/*-setup.exe installer/
       - name: Download released Windows installer
+        if: inputs.release_run_id != ''
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_RUN_ID: ${{ inputs.release_run_id }}

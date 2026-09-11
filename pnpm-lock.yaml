@@ -223,6 +223,9 @@ catalogs:
     '@types/node':
       specifier: 26.1.1
       version: 26.1.1
+    '@types/proper-lockfile':
+      specifier: ^4.1.4
+      version: 4.1.4
     '@types/react':
       specifier: 19.2.17
       version: 19.2.17
@@ -259,6 +262,9 @@ catalogs:
     playwright:
       specifier: 1.55.0
       version: 1.55.0
+    proper-lockfile:
+      specifier: 4.1.2
+      version: 4.1.2
     radix-ui:
       specifier: ^1.6.4
       version: 1.6.4
@@ -381,6 +387,9 @@ importers:
       node-pty:
         specifier: 'catalog:'
         version: 1.1.0
+      proper-lockfile:
+        specifier: 'catalog:'
+        version: 4.1.2
       radix-ui:
         specifier: 'catalog:'
         version: 1.6.4(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -503,10 +512,16 @@ importers:
       '@pix/contracts':
         specifier: workspace:*
         version: link:../contracts
+      proper-lockfile:
+        specifier: 'catalog:'
+        version: 4.1.2
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
         version: 26.1.1
+      '@types/proper-lockfile':
+        specifier: 'catalog:'
+        version: 4.1.4
       typescript:
         specifier: 'catalog:'
         version: 6.0.2
@@ -540,6 +555,9 @@ importers:
       node-pty:
         specifier: 'catalog:'
         version: 1.1.0
+      proper-lockfile:
+        specifier: 'catalog:'
+        version: 4.1.2
       undici:
         specifier: ^7.24.0
         version: 7.28.0
@@ -2380,6 +2398,9 @@ packages:
 
   '@types/node@26.1.1':
     resolution: {integrity: sha512-nxAkRSVkN1Y0JC1W8ky/fTfkGsMmcrRsbx+3XoZE+rMOX71kLYTV7fLXpqud1GpbpP5TuffXFqfX7fH2GgZREw==}
+
+  '@types/proper-lockfile@4.1.4':
+    resolution: {integrity: sha512-uo2ABllncSqg9F1D4nugVl9v93RmjxF6LJzQLMLDdPaXCUIDPeOJ21Gbqi43xNKzBi/WQ0Q0dICqufzQbMjipQ==}
 
   '@types/react-dom@19.2.3':
     resolution: {integrity: sha512-jp2L/eY6fn+KgVVQAOqYItbF0VY/YApe5Mz2F0aykSO8gx31bYCZyvSeYxCHKvzHG5eZjc+zyaS5BrBWya2+kQ==}
@@ -5778,6 +5799,10 @@ snapshots:
   '@types/node@26.1.1':
     dependencies:
       undici-types: 8.3.0
+
+  '@types/proper-lockfile@4.1.4':
+    dependencies:
+      '@types/retry': 0.12.0
 
   '@types/react-dom@19.2.3(@types/react@19.2.17)':
     dependencies:

@@ -1,3 +1,4 @@
+import { normalizePathKey } from "@pix/contracts";
 /**
  * Sidebar session run markers (ui-spec §5.2) — glyphs next to the title, not badges.
  * States are derived from host events / running map; not a second source of truth.
@@ -31,10 +32,7 @@ export const COMPLETED_MARKER_MS = 2_500;
 export const STICKY_TERMINAL_MARKER_MS = 4_000;
 
 function defaultSessionKey(raw: string | undefined | null): string {
-  if (!raw) return "";
-  let p = raw.replace(/\\/g, "/").replace(/\/+$/, "").trim().toLowerCase();
-  if (p.startsWith("/private/")) p = p.slice("/private".length);
-  return p;
+  return normalizePathKey(raw);
 }
 
 export function sessionMarkerFromThread(
@@ -62,10 +60,10 @@ export function sessionMarkerFromThread(
     if (hit) return hit;
   }
   for (const key of candidates) {
-    if (key.startsWith("/private/")) {
+    if (/^\/private\/(?:var|tmp|etc)\//.test(key) && normalizePathKey(key) !== key) {
       const alt = key.slice("/private".length);
       if (markers[alt]) return markers[alt];
-    } else if (key.startsWith("/")) {
+    } else if (/^\/(?:var|tmp|etc)\//.test(key) && normalizePathKey(`/private${key}`) === key) {
       const alt = `/private${key}`;
       if (markers[alt]) return markers[alt];
     }
