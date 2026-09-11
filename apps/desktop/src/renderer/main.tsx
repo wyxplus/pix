@@ -664,6 +664,8 @@ function App() {
     pendingPureConversation || Boolean(snapshot?.cwd && isNonProjectWorkspacePath(snapshot.cwd));
   /** Suppress snapshot→selection sync while switchThread / newBlankTask is in flight. */
   const switchingSessionRef = useRef(false);
+  const [switchingSession, setSwitchingSession] = useState(false);
+  const [creatingProjectThread, setCreatingProjectThread] = useState(false);
 
   useEffect(() => {
     // Never promote conversation/scratch dirs into the "selected project" slot.
@@ -1818,6 +1820,14 @@ function App() {
     overrides?: { text?: string; attachments?: string[] },
   ) {
     event?.preventDefault();
+    // Keep the draft until the new session identity is authoritative. Otherwise
+    // an early send can retitle the old session and dispatch into a different one.
+    if (
+      pendingPureConversationRef.current ||
+      switchingSessionRef.current ||
+      newThreadForProjectInFlightRef.current
+    )
+      return;
     // Always read prompt from the store so edit-resend / async paths are not stale.
     const draft = overrides?.text ?? useShellStore.getState().prompt;
     const attachedPaths = [...(overrides?.attachments ?? attachments)];
@@ -2634,6 +2644,7 @@ function App() {
     if (newThreadForProjectInFlightRef.current) return;
 
     newThreadForProjectInFlightRef.current = true;
+    setCreatingProjectThread(true);
     try {
       while (true) {
         const runGen = newThreadForProjectGenRef.current;
@@ -2696,6 +2707,7 @@ function App() {
       }
     } finally {
       newThreadForProjectInFlightRef.current = false;
+      setCreatingProjectThread(false);
       // Path queued after we cleared inFlight but before exit — pick it up.
       if (newThreadForProjectPendingPathRef.current) {
         void newThreadForProject(newThreadForProjectPendingPathRef.current);
@@ -2861,6 +2873,7 @@ function App() {
 
     // Tab-like switch: never abort. Main parks a busy host and may promote a parked one.
     switchingSessionRef.current = true;
+    setSwitchingSession(true);
     const fromMode = useShellStore.getState().contentMode;
     // Best-effort target mode from prefs (sessionPath is the session file).
     const targetModePref = loadContentModeForSession(sessionPath);
@@ -2997,6 +3010,7 @@ function App() {
       if (needWorkspaceSwitch) void refreshRecentWorkspaces();
       // End switch gate, then bump reveal so settle runs with final history.
       switchingSessionRef.current = false;
+      setSwitchingSession(false);
       requestContentReveal();
       // Restore this session's remembered surface (chat vs terminal).
       const landedFile = opened.snapshot.sessionFile?.trim() || sessionPath;
@@ -3016,6 +3030,7 @@ function App() {
       endSurfaceTransition();
     } finally {
       switchingSessionRef.current = false;
+      setSwitchingSession(false);
     }
   }
 
@@ -3058,6 +3073,7 @@ function App() {
     // Hold chat until the same session has been reloaded from disk. The sync
     // unmount removes the canvas from Chromium's compositor before mode flips.
     switchingSessionRef.current = true;
+    setSwitchingSession(true);
     beginSurfaceTransition();
     markSessionOpenForBottomScroll();
     setContentMode("chat");
@@ -3092,6 +3108,7 @@ function App() {
       }
     } finally {
       switchingSessionRef.current = false;
+      setSwitchingSession(false);
       if (contentReloaded) requestContentReveal();
       else finishBlankHold();
       endSurfaceTransition();
@@ -3586,6 +3603,9 @@ function App() {
                             onAbort={() => void abort()}
                             onKeyDown={onComposerKeyDown}
                             running={running}
+                            submitDisabled={
+                              pendingPureConversation || switchingSession || creatingProjectThread
+                            }
                             composerRef={composerRef}
                             workspacePath={workspacePath}
                             recentWorkspaces={recentWorkspaces}

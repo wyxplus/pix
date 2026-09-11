@@ -140,6 +140,8 @@ export interface ComposerProps {
   onAbort: () => void;
   onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   running: boolean;
+  /** Drafts remain editable while the destination session is being prepared. */
+  submitDisabled?: boolean;
   composerRef: RefObject<HTMLTextAreaElement | null>;
   workspacePath: string | undefined;
   recentWorkspaces: string[];
@@ -1361,6 +1363,10 @@ export function Composer(props: ComposerProps) {
         ref={composerCardRef}
         className={cn("composer-card", showProjectBar && "composer-card-with-protrusion")}
         onSubmit={(event) => {
+          if (props.submitDisabled) {
+            event.preventDefault();
+            return;
+          }
           if (refTokens.length > 0) {
             const text = serializeComposerRefs(refTokens, props.prompt);
             setRefTokens([]);
@@ -1568,6 +1574,7 @@ export function Composer(props: ComposerProps) {
                 type="button"
                 size="icon"
                 data-testid={props.surface === "side" ? "selection-side-chat-stop" : "abort-prompt"}
+                disabled={props.submitDisabled}
                 onClick={(event) => {
                   event.preventDefault();
                   props.onAbort();
@@ -1585,7 +1592,8 @@ export function Composer(props: ComposerProps) {
                 size="icon"
                 data-testid={props.surface === "side" ? "selection-side-chat-send" : "send-prompt"}
                 disabled={
-                  !props.prompt.trim() && props.attachments.length === 0 && refTokens.length === 0
+                  props.submitDisabled ||
+                  (!props.prompt.trim() && props.attachments.length === 0 && refTokens.length === 0)
                 }
                 aria-label={tr("composer.start")}
                 className="h-7 w-7 rounded-full border-0 bg-foreground text-background shadow-none hover:bg-foreground/90 disabled:opacity-30"

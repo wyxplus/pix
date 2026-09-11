@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vite-plus/test";
 import { pruneManagedWorktreesSafely, removeWorktreeSafely } from "./worktree-prune.ts";
-import { normalizePathKey } from "@pix/contracts";
+import { normalizeHostCwdKey } from "./host-park-policy.ts";
 
 const exec = promisify(execFile);
 async function git(cwd: string, ...args: string[]) {
@@ -70,8 +70,8 @@ describe("safe managed worktree cleanup", () => {
         limit: 1,
         protectedPaths,
       });
-      expect(removed.map((path) => normalizePathKey(path))).toEqual([
-        normalizePathKey(paths["clean 数据"]),
+      expect(removed.map((path) => normalizeHostCwdKey(path))).toEqual([
+        normalizeHostCwdKey(paths["clean 数据"]!),
       ]);
       for (const [name, path] of Object.entries(paths)) {
         if (name === "clean 数据") await expect(access(path)).rejects.toThrow();
