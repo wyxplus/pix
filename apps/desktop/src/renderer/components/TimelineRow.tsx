@@ -718,13 +718,15 @@ export const TimelineRow = memo(function TimelineRow(props: {
     return (
       <article className="timeline-assistant-row group/msg" data-kind="assistant">
         <div className="timeline-assistant-body">
-          <MarkdownContent
-            className="w-full leading-relaxed text-foreground"
-            workspacePath={props.workspacePath}
-            locale={props.locale}
-          >
-            {item.text}
-          </MarkdownContent>
+          <div data-selection-message={item.id}>
+            <MarkdownContent
+              className="w-full leading-relaxed text-foreground"
+              workspacePath={props.workspacePath}
+              locale={props.locale}
+            >
+              {item.text}
+            </MarkdownContent>
+          </div>
           {item.images?.length ? (
             <TimelineImages
               images={item.images}

@@ -21,6 +21,8 @@ export interface ModelSummary {
   id: string;
   name: string;
   reasoning: boolean;
+  availableThinkingLevels?: string[];
+  availableServiceTiers?: Array<"flex" | "default" | "priority">;
   /** pi-ai request API (for example, `openai-responses`). */
   api?: string;
   /** Input modalities advertised by pi-ai for this model. */
@@ -1077,6 +1079,21 @@ export type HostCommand =
       systemPrompt?: string;
       prompt: string;
       model?: { provider: string; id: string };
+      messages?: SideChatRequest["messages"];
+      stream?: boolean;
+    }
+  | {
+      protocolVersion: typeof IPC_PROTOCOL_VERSION;
+      type: "util.side-chat";
+      requestId: string;
+      request: SideChatRequest;
+      systemPrompt: string;
+    }
+  | {
+      protocolVersion: typeof IPC_PROTOCOL_VERSION;
+      type: "util.cancel-text";
+      requestId: string;
+      targetRequestId: string;
     }
   | {
       protocolVersion: typeof IPC_PROTOCOL_VERSION;
@@ -1290,6 +1307,12 @@ export type HostEvent =
       type: "util.text";
       requestId?: string;
       text: string;
+    }
+  | {
+      protocolVersion: typeof IPC_PROTOCOL_VERSION;
+      type: "util.text-delta";
+      requestId: string;
+      delta: string;
     };
 
 /** Progress events while ensuring the global `pi` CLI is present. */
@@ -1592,6 +1615,45 @@ export type BundledRuntimeStatus = {
     path?: string;
     enabled: boolean;
   };
+};
+
+export interface SideChatRequest {
+  requestId: string;
+  sessionId: string;
+  selection: string;
+  context: string;
+  model?: { provider: string; id: string };
+  thinkingLevel?: string;
+  serviceTier?: "flex" | "default" | "priority";
+  accessMode?: "default" | "autoReview" | "full";
+  messages: Array<{ role: "user" | "assistant"; text: string; imagePaths?: string[] }>;
+  sourceMessages?: Array<{ role: "user" | "assistant"; text: string }>;
+}
+
+/** Desktop-owned side conversations; the source pi session remains unchanged. */
+export type SavedSideChat = {
+  id: string;
+  sessionKey: string;
+  sessionId: string;
+  selection: { messageId: string; text: string; context: string };
+  sourceMessages: NonNullable<SideChatRequest["sourceMessages"]>;
+  messages: Array<{ id: string; role: "user" | "assistant"; text: string; attachments?: string[] }>;
+  draft: string;
+  attachments: string[];
+  settings: {
+    model?: { provider: string; id: string };
+    thinkingLevel: string;
+    serviceTier: "flex" | "default" | "priority";
+    accessMode: "default" | "autoReview" | "full";
+  };
+  status: "idle" | "streaming" | "failed" | "stopped";
+  error: string;
+  requestId?: string | undefined;
+};
+export type SideChatArchive = {
+  version: 1;
+  chats: Record<string, SavedSideChat>;
+  activeBySession: Record<string, string>;
 };
 
 export interface PixDesktopApi {
@@ -1955,7 +2017,15 @@ export interface PixDesktopApi {
     get(): Promise<PiSettingsView>;
     patch(patch: PiSettingsPatch): Promise<PiSettingsPatchResult>;
   };
+  sideChats: {
+    load(): Promise<SideChatArchive>;
+    save(archive: SideChatArchive): Promise<void>;
+  };
   agent: {
+    /** Answer about selected response text without modifying the main transcript. */
+    sideChat(request: SideChatRequest): Promise<string>;
+    cancelSideChat(requestId: string): Promise<void>;
+    onSideChatDelta(listener: (event: { requestId: string; delta: string }) => void): () => void;
     prompt(
       message: string,
       streamingBehavior?: "steer" | "followUp",
@@ -2627,9 +2697,27 @@ export function isHostCommand(value: unknown): value is HostCommand {
     return (
       typeof value.prompt === "string" &&
       (value.systemPrompt === undefined || typeof value.systemPrompt === "string") &&
-      (value.model === undefined || isModelSelector(value.model))
+      (value.model === undefined || isModelSelector(value.model)) &&
+      (value.stream === undefined || typeof value.stream === "boolean") &&
+      (value.messages === undefined ||
+        (Array.isArray(value.messages) &&
+          value.messages.every(
+            (message) =>
+              isRecord(message) &&
+              (message.role === "user" || message.role === "assistant") &&
+              typeof message.text === "string",
+          )))
     );
   }
+  if (value.type === "util.cancel-text") return typeof value.targetRequestId === "string";
+  if (value.type === "util.side-chat")
+    return (
+      isRecord(value.request) &&
+      value.request.requestId === value.requestId &&
+      typeof value.request.sessionId === "string" &&
+      Array.isArray(value.request.messages) &&
+      typeof value.systemPrompt === "string"
+    );
   if (
     value.type === "session.list" ||
     value.type === "session.new" ||
@@ -2984,6 +3072,8 @@ export function isHostEvent(value: unknown): value is HostEvent {
       );
     case "util.text":
       return typeof value.text === "string";
+    case "util.text-delta":
+      return typeof value.requestId === "string" && typeof value.delta === "string";
     default:
       return false;
   }

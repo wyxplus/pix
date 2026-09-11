@@ -11,6 +11,7 @@ import {
   type HostCommand,
   type HostEvent,
   type HostSnapshot,
+  type SideChatRequest,
   type ModelSummary,
   type ModelsJsonConfigView,
   type PhotonProbeResult,
@@ -106,6 +107,8 @@ import {
 import { ensureProvisionedRuntimes } from "../main/runtime-provision.ts";
 import { augmentEnvPath } from "../main/shell-path.ts";
 import { ThemeLibrary } from "../main/theme-library.ts";
+import { SideChatLibrary } from "../main/side-chat-library.ts";
+import { sideChatPrompt, SIDE_CHAT_SYSTEM_PROMPT } from "../main/side-chat.ts";
 
 /**
  * WorkBuddy-style managed runtimes:
@@ -2043,6 +2046,8 @@ interface ActiveHost {
   ignoreMessages: boolean;
   stopping: boolean;
   stderr: string;
+  /** Utility responses remain private even if they arrive after the RPC timeout. */
+  utilityRequestIds: Set<string>;
 }
 
 type PendingWaiter = {
@@ -2077,6 +2082,9 @@ function hostCommandTimeoutMs(commandType: string): number | undefined {
       return 300_000;
     case "providers.usage":
       return 25_000;
+    case "util.complete-text":
+    case "util.side-chat":
+      return 180_000;
     case "packages.install":
     case "packages.remove":
     case "packages.update":
@@ -2194,7 +2202,8 @@ function sessionKeyFromSnapshot(snapshot: HostSnapshot | undefined): string | un
 
 function pendingHasPrompt(pending: Map<string, PendingWaiter>): boolean {
   for (const waiter of pending.values()) {
-    if (waiter.commandType === "agent.prompt") return true;
+    if (waiter.commandType === "agent.prompt" || waiter.commandType === "util.side-chat")
+      return true;
   }
   return false;
 }
@@ -2226,6 +2235,7 @@ class HostSupervisor {
    * Busy parks are never evicted. Idle parks are capped and reaped after TTL.
    */
   #parked = new Map<string, ParkedHost>();
+  #sideChatRequests = new Map<string, ActiveHost>();
 
   #exclusive<T>(fn: () => Promise<T>): Promise<T> {
     const run = this.#opQueue.then(fn, fn);
@@ -3515,18 +3525,62 @@ class HostSupervisor {
     return event.models;
   }
 
+  async sideChat(request: SideChatRequest): Promise<string> {
+    const prompt = sideChatPrompt(request);
+    if (!this.#host || !this.#snapshot || this.#snapshot.sessionId !== request.sessionId) {
+      throw new Error("The source conversation is no longer active. Select the passage again.");
+    }
+    if (this.#sideChatRequests.has(request.requestId))
+      throw new Error("Side request is already running");
+    this.#sideChatRequests.set(request.requestId, this.#host);
+    try {
+      const result = await this.#request({
+        protocolVersion: IPC_PROTOCOL_VERSION,
+        type: "util.side-chat",
+        requestId: request.requestId,
+        request,
+        systemPrompt: `${SIDE_CHAT_SYSTEM_PROMPT}\n\n${prompt}`,
+      });
+      if (result.type !== "util.text") throw new Error("Unexpected side conversation response");
+      return result.text;
+    } finally {
+      // Also cancel on timeout so a detached request cannot keep consuming tokens.
+      this.cancelSideChat(request.requestId);
+      this.#sideChatRequests.delete(request.requestId);
+    }
+  }
+
+  cancelSideChat(requestId: string): void {
+    const host = this.#sideChatRequests.get(requestId);
+    if (!host || !host.child.connected || host.ignoreMessages) return;
+    host.child.send({
+      protocolVersion: IPC_PROTOCOL_VERSION,
+      type: "util.cancel-text",
+      requestId: randomUUID(),
+      targetRequestId: requestId,
+    } satisfies HostCommand);
+  }
+
   async completeText(
     prompt: string,
-    options?: { systemPrompt?: string; model?: { provider: string; id: string } },
+    options?: {
+      systemPrompt?: string;
+      model?: { provider: string; id: string };
+      requestId?: string;
+      messages?: SideChatRequest["messages"];
+      stream?: boolean;
+    },
   ): Promise<string> {
     if (!this.#host) await this.start();
     const command = {
       protocolVersion: IPC_PROTOCOL_VERSION,
       type: "util.complete-text" as const,
-      requestId: randomUUID(),
+      requestId: options?.requestId ?? randomUUID(),
       prompt,
       ...(options?.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
       ...(options?.model ? { model: options.model } : {}),
+      ...(options?.messages ? { messages: options.messages } : {}),
+      ...(options?.stream ? { stream: true } : {}),
     } satisfies HostCommand;
     const event = await this.#request(command);
     if (event.type !== "util.text")
@@ -3896,6 +3950,7 @@ class HostSupervisor {
       ignoreMessages: false,
       stopping: false,
       stderr: "",
+      utilityRequestIds: new Set(),
     };
     this.#host = host;
 
@@ -3913,6 +3968,15 @@ class HostSupervisor {
 
     child.on("message", (message) => {
       if (host.ignoreMessages || !isHostEvent(message)) return;
+      if (message.type === "util.text-delta") {
+        if (this.#sideChatRequests.get(message.requestId) === host && !this.window.isClosed()) {
+          this.window.send("pix:side-chat:delta", {
+            requestId: message.requestId,
+            delta: message.delta,
+          });
+        }
+        return;
+      }
       const isForeground = this.#host === host;
       const parked = isForeground ? undefined : this.#findParkedByHost(host);
       if (!isForeground && !parked) return;
@@ -3985,7 +4049,11 @@ class HostSupervisor {
 
       // Foreground events go to the renderer as today. Parked hosts forward
       // turn/tool/retry events so sidebar markers and promote reconnect stay live.
-      if (isForeground) {
+      const utilityResponse =
+        "requestId" in message && message.requestId
+          ? host.utilityRequestIds.delete(message.requestId)
+          : false;
+      if (isForeground && !utilityResponse) {
         this.#emit(message, false);
       } else if (
         message.type === "runtime.event" &&
@@ -4088,6 +4156,8 @@ class HostSupervisor {
   #request(command: HostCommand): Promise<HostEvent> {
     const host = this.#host;
     if (!host || host.ignoreMessages) return Promise.reject(new Error("Agent Host is not running"));
+    if (command.type === "util.complete-text" || command.type === "util.side-chat")
+      host.utilityRequestIds.add(command.requestId);
     // Capture the map identity so timeouts still work after the host is parked
     // (park moves this Map onto the ParkedHost entry).
     const pendingMap = this.#pending;
@@ -4756,6 +4826,19 @@ void (async () => {
       return supervisor?.prompt(message, streamingBehavior, imagePaths);
     },
   );
+
+  const sideChatLibrary = new SideChatLibrary(app.getPath("userData"));
+  rpc.handle("pix:side-chats:load", () => sideChatLibrary.load());
+  rpc.handle("pix:side-chats:save", (_event, archive: unknown) => sideChatLibrary.save(archive));
+
+  rpc.handle("pix:agent:side-chat", (_event, request: SideChatRequest) => {
+    if (!supervisor) throw new Error("Agent Host is not ready");
+    return supervisor.sideChat(request);
+  });
+  rpc.handle("pix:agent:side-chat-cancel", (_event, requestId: string) => {
+    if (typeof requestId !== "string") throw new Error("Invalid side request ID");
+    supervisor?.cancelSideChat(requestId);
+  });
 
   // ── Embedded pi TUI (real PTY; contentMode terminal) ─────────────────────
   rpc.handle(

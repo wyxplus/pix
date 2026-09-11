@@ -17,18 +17,26 @@ interface LaunchedPix {
   workspace: string;
   attachmentPaths: string[];
   fakeModel: FakeOpenAiServer;
+  /** Restart both renderer and sidecar against the same on-disk app and pi data. */
+  restart: () => Promise<Page>;
 }
 
 export interface PixE2EFixtures {
   pix: LaunchedPix;
   page: Page;
+  conversationWorkspace: boolean;
 }
 
-async function launchPixApp(browser: Browser): Promise<LaunchedPix> {
+async function launchPixApp(
+  browser: Browser,
+  conversationWorkspace: boolean,
+): Promise<LaunchedPix> {
   const root = await mkdtemp(join(tmpdir(), "pix-e2e-"));
   const home = join(root, "home");
   const agentDir = join(home, ".pi", "agent");
-  const workspace = join(root, "workspace");
+  const workspace = conversationWorkspace
+    ? join(home, "Documents", "Pix", "conversations")
+    : join(root, "workspace");
   const toolPath = join(workspace, "fixture.txt");
   const attachmentPaths = [
     "report.xlsx",
@@ -178,12 +186,43 @@ async function launchPixApp(browser: Browser): Promise<LaunchedPix> {
     timeout: 120_000,
   });
 
-  return { app, page, root, agentDir, workspace, attachmentPaths, fakeModel };
+  const launched: LaunchedPix = {
+    app,
+    page,
+    root,
+    agentDir,
+    workspace,
+    attachmentPaths,
+    fakeModel,
+    async restart() {
+      const previousSession = await launched.page.evaluate(() => window.pix.host.snapshot());
+      await launched.app.close();
+      launched.app = await launchTauriHarness(browser, appDirectory, env);
+      launched.page = launched.app.page;
+      await launched.page.waitForSelector('[data-testid="pix-app"][data-bootstrap-ready="true"]', {
+        timeout: 120_000,
+      });
+      // The isolated /tmp workspace is deliberately excluded from product auto-resume.
+      // Resume it through the production API, then exercise normal renderer hydration.
+      await launched.page.evaluate((options) => window.pix.host.start(options), {
+        cwd: workspace,
+        ...(previousSession?.sessionFile ? { sessionFile: previousSession.sessionFile } : {}),
+        force: true,
+      });
+      await launched.page.reload();
+      await launched.page.waitForSelector('[data-testid="pix-app"][data-bootstrap-ready="true"]', {
+        timeout: 120_000,
+      });
+      return launched.page;
+    },
+  };
+  return launched;
 }
 
 export const test = base.extend<PixE2EFixtures>({
-  pix: async ({ browser }, use) => {
-    const launched = await launchPixApp(browser);
+  conversationWorkspace: [false, { option: true }],
+  pix: async ({ browser, conversationWorkspace }, use) => {
+    const launched = await launchPixApp(browser, conversationWorkspace);
     try {
       await use(launched);
     } finally {

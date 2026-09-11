@@ -66,6 +66,8 @@ export function ThreadHeader(props: {
   onToggleContentMode?: (() => void) | undefined;
   /** A running turn must keep its current surface until it settles. */
   contentModeSwitchLocked?: boolean;
+  sideChatOpen?: boolean;
+  onToggleSideChat?: (() => void) | undefined;
   /**
    * Portable extension chrome (status / working / title).
    * Shown compactly in the titlebar — never as a content-column row.
@@ -349,6 +351,23 @@ export function ThreadHeader(props: {
             <Terminal className="size-3.5" strokeWidth={1.75} />
           )}
         </button>
+        {props.onToggleSideChat ? (
+          <button
+            type="button"
+            data-testid="thread-header-side-chat"
+            className={cn(
+              "no-drag inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg",
+              "text-[var(--muted-foreground)] hover:bg-[var(--hover-fill)] hover:text-[var(--foreground)]",
+              props.sideChatOpen && "bg-[var(--accent)] text-[var(--foreground)]",
+            )}
+            title={tr("selection.sideChat")}
+            aria-label={tr("selection.sideChat")}
+            aria-expanded={props.sideChatOpen}
+            onClick={props.onToggleSideChat}
+          >
+            <MessageSquare className="size-3.5" strokeWidth={1.75} />
+          </button>
+        ) : null}
         {showEnvToggle ? (
           <button
             type="button"

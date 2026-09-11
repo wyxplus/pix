@@ -126,9 +126,13 @@ export interface ComposerModelOption {
   name: string;
   /** Aligns with model settings: "custom" vs built-in catalog providers. */
   source?: string;
+  availableThinkingLevels?: string[];
+  availableServiceTiers?: ServiceTierId[];
 }
 
 export interface ComposerProps {
+  surface?: "main" | "side";
+  contextHeader?: ReactNode;
   locale: Locale;
   prompt: string;
   onPromptChange: (value: string) => void;
@@ -1150,13 +1154,24 @@ export function Composer(props: ComposerProps) {
 
   useEffect(() => {
     const onNativeDrop = (event: Event) => {
-      const paths = (event as CustomEvent<unknown>).detail;
+      const detail = (event as CustomEvent<unknown>).detail;
+      const drop = detail as { paths?: unknown; target?: string } | null;
+      const paths = Array.isArray(detail) ? detail : drop?.paths;
+      // Only the addressed/focused composer receives a native drop. Both main
+      // and side composers can be mounted at the same time.
+      const target =
+        drop?.target ??
+        document.activeElement
+          ?.closest("[data-composer-surface]")
+          ?.getAttribute("data-composer-surface") ??
+        "main";
+      if (target !== (props.surface ?? "main")) return;
       if (Array.isArray(paths) && paths.every((path) => typeof path === "string"))
         props.onAddAttachments?.(paths);
     };
     window.addEventListener("pix:native-drop", onNativeDrop);
     return () => window.removeEventListener("pix:native-drop", onNativeDrop);
-  }, [props.onAddAttachments]);
+  }, [props.onAddAttachments, props.surface]);
 
   function handleComposerDrop(event: DragEvent<HTMLTextAreaElement>) {
     const files = event.dataTransfer?.files;
@@ -1274,7 +1289,8 @@ export function Composer(props: ComposerProps) {
       ref={rootRef}
       // Parent is `.thread-content-column` (same as timeline) — fill it completely.
       className="pointer-events-auto relative w-full min-w-0 max-w-full"
-      data-testid="composer-root"
+      data-testid={props.surface === "side" ? "side-chat-composer" : "composer-root"}
+      data-composer-surface={props.surface ?? "main"}
     >
       <ComposerQueueCard
         locale={props.locale}
@@ -1349,6 +1365,7 @@ export function Composer(props: ComposerProps) {
           props.onSubmit(event);
         }}
       >
+        {props.contextHeader}
         {visibleAttachments.length > 0 ? (
           <ComposerAttachmentList
             paths={visibleAttachments}
@@ -1370,8 +1387,8 @@ export function Composer(props: ComposerProps) {
           </div>
           <Textarea
             ref={props.composerRef}
-            aria-label="Prompt"
-            data-testid="prompt-input"
+            aria-label={props.surface === "side" ? tr("selection.question") : "Prompt"}
+            data-testid={props.surface === "side" ? "selection-side-chat-input" : "prompt-input"}
             value={props.prompt}
             onChange={(event) =>
               handlePromptChange(
@@ -1408,7 +1425,9 @@ export function Composer(props: ComposerProps) {
               fitComposerPromptHeight(props.composerRef.current);
               syncPromptHighlightScroll(props.composerRef.current);
             }}
-            placeholder={tr("composer.placeholder")}
+            placeholder={tr(
+              props.surface === "side" ? "selection.question" : "composer.placeholder",
+            )}
             rows={COMPOSER_PROMPT_MIN_LINES}
             className={cn(
               "composer-prompt-scroll composer-prompt-input composer-prompt-type resize-none rounded-none border-0 bg-transparent",
@@ -1540,10 +1559,14 @@ export function Composer(props: ComposerProps) {
             {props.running ? (
               // During AI reply: send becomes a single stop control (queue still via Enter).
               <Button
+                key="stop"
                 type="button"
                 size="icon"
-                data-testid="abort-prompt"
-                onClick={() => props.onAbort()}
+                data-testid={props.surface === "side" ? "selection-side-chat-stop" : "abort-prompt"}
+                onClick={(event) => {
+                  event.preventDefault();
+                  props.onAbort();
+                }}
                 aria-label={tr("composer.stop")}
                 title={tr("composer.stop")}
                 className="h-7 w-7 rounded-full border-0 bg-foreground text-background shadow-none hover:bg-foreground/90"
@@ -1552,9 +1575,10 @@ export function Composer(props: ComposerProps) {
               </Button>
             ) : (
               <Button
+                key="send"
                 type="submit"
                 size="icon"
-                data-testid="send-prompt"
+                data-testid={props.surface === "side" ? "selection-side-chat-send" : "send-prompt"}
                 disabled={
                   !props.prompt.trim() && props.attachments.length === 0 && refTokens.length === 0
                 }

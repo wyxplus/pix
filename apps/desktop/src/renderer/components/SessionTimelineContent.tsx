@@ -1,5 +1,7 @@
 import type { HostEvent } from "@pix/contracts";
-import { useMemo, type ReactNode, type Ref } from "react";
+import { useMemo, useRef, type ReactNode, type Ref } from "react";
+import { TextSelectionMenu } from "./TextSelectionMenu.tsx";
+import type { MessageSelection, SelectionAction } from "../lib/text-selection.ts";
 import {
   MessageScroller,
   MessageScrollerContent,
@@ -39,6 +41,7 @@ export type SessionTimelineContentProps = {
   editingLocked?: boolean;
   onEditUser?: (item: UserTimelineItem, text: string) => void | Promise<void>;
   onForkAssistant?: (item: AssistantTimelineItem) => void | Promise<void>;
+  onSelectionAction?: (action: SelectionAction, selection: MessageSelection) => void;
   endRef?: Ref<HTMLDivElement>;
   emptyState?: ReactNode;
   footer?: ReactNode;
@@ -109,6 +112,7 @@ export function SessionTimelineScroller(props: SessionTimelineScrollerProps) {
 
 /** Product session timeline shared by the desktop app and the browser demo */
 export function SessionTimelineContent(props: SessionTimelineContentProps) {
+  const rootRef = useRef<HTMLDivElement>(null);
   const {
     items,
     events,
@@ -133,6 +137,7 @@ export function SessionTimelineContent(props: SessionTimelineContentProps) {
 
   return (
     <MessageScrollerContent
+      ref={rootRef}
       className={cn(
         "thread-content-column thread-content-column-stack gap-0",
         hasActivity && "thread-messages-active pt-6 pb-0",
@@ -198,6 +203,15 @@ export function SessionTimelineContent(props: SessionTimelineContentProps) {
         </>
       ) : ready ? (
         emptyState
+      ) : null}
+      {props.onSelectionAction ? (
+        <TextSelectionMenu
+          key={sessionKey}
+          rootRef={rootRef}
+          items={items}
+          locale={locale}
+          onAction={props.onSelectionAction}
+        />
       ) : null}
       {footer}
     </MessageScrollerContent>

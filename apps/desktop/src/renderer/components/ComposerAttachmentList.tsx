@@ -89,7 +89,7 @@ function useAttachmentPreviews(paths: string[]): Record<string, string> {
 export function ComposerAttachmentList(props: {
   paths: string[];
   locale: Locale;
-  onRemove: (path: string) => void;
+  onRemove?: (path: string) => void;
 }) {
   const previews = useAttachmentPreviews(props.paths);
   const [previewPath, setPreviewPath] = useState<string>();
@@ -147,18 +147,20 @@ export function ComposerAttachmentList(props: {
                     <AttachmentDescription>{presentation.typeLabel}</AttachmentDescription>
                   ) : null}
                 </AttachmentContent>
-                <AttachmentActions>
-                  <AttachmentAction
-                    type="button"
-                    size="icon-xs"
-                    variant="ghost"
-                    aria-label={tr("composer.attach.remove")}
-                    className="text-muted-foreground opacity-70 hover:text-destructive hover:opacity-100"
-                    onClick={() => props.onRemove(path)}
-                  >
-                    <X className="size-3.5" strokeWidth={2} />
-                  </AttachmentAction>
-                </AttachmentActions>
+                {props.onRemove ? (
+                  <AttachmentActions>
+                    <AttachmentAction
+                      type="button"
+                      size="icon-xs"
+                      variant="ghost"
+                      aria-label={tr("composer.attach.remove")}
+                      className="text-muted-foreground opacity-70 hover:text-destructive hover:opacity-100"
+                      onClick={() => props.onRemove?.(path)}
+                    >
+                      <X className="size-3.5" strokeWidth={2} />
+                    </AttachmentAction>
+                  </AttachmentActions>
+                ) : null}
               </Attachment>
             );
           })}

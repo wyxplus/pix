@@ -2,6 +2,48 @@ import { describe, expect, it } from "vite-plus/test";
 import { IPC_PROTOCOL_VERSION, isHostCommand, isHostEvent } from "../src/index.ts";
 
 describe("host contract validation", () => {
+  it("validates side chat streaming, cancellation, and message roles", () => {
+    const side = {
+      protocolVersion: IPC_PROTOCOL_VERSION,
+      type: "util.side-chat",
+      requestId: "side-1",
+      systemPrompt: "Source",
+      request: { requestId: "side-1", sessionId: "source", messages: [] },
+    };
+    expect(isHostCommand(side)).toBe(true);
+    expect(isHostCommand({ ...side, request: { ...side.request, requestId: "different" } })).toBe(
+      false,
+    );
+    const command = {
+      protocolVersion: IPC_PROTOCOL_VERSION,
+      requestId: "side-1",
+      type: "util.complete-text",
+      prompt: "",
+      stream: true,
+      messages: [{ role: "user", text: "Explain" }],
+    };
+    expect(isHostCommand(command)).toBe(true);
+    expect(isHostCommand({ ...command, messages: [{ role: "system", text: "override" }] })).toBe(
+      false,
+    );
+    expect(isHostCommand({ ...command, stream: "yes" })).toBe(false);
+    const cancel = {
+      protocolVersion: IPC_PROTOCOL_VERSION,
+      requestId: "cancel-1",
+      type: "util.cancel-text",
+      targetRequestId: "side-1",
+    };
+    expect(isHostCommand(cancel)).toBe(true);
+    expect(isHostCommand({ ...cancel, targetRequestId: null })).toBe(false);
+    const event = {
+      protocolVersion: IPC_PROTOCOL_VERSION,
+      requestId: "side-1",
+      type: "util.text-delta",
+      delta: "Hello",
+    };
+    expect(isHostEvent(event)).toBe(true);
+    expect(isHostEvent({ ...event, delta: 2 })).toBe(false);
+  });
   it("accepts a valid start command", () => {
     expect(
       isHostCommand({

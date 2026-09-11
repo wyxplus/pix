@@ -198,7 +198,19 @@ const api: PixDesktopApi = {
     get: () => ipcRenderer.invoke("pix:settings:get"),
     patch: (patch) => ipcRenderer.invoke("pix:settings:patch", patch),
   },
+  sideChats: {
+    load: () => ipcRenderer.invoke("pix:side-chats:load"),
+    save: (archive) => ipcRenderer.invoke("pix:side-chats:save", archive),
+  },
   agent: {
+    sideChat: (request) => ipcRenderer.invoke("pix:agent:side-chat", request),
+    cancelSideChat: (requestId) => ipcRenderer.invoke("pix:agent:side-chat-cancel", requestId),
+    onSideChatDelta(listener) {
+      const handler = (_event: undefined, value: { requestId: string; delta: string }) =>
+        listener(value);
+      ipcRenderer.on("pix:side-chat:delta", handler);
+      return () => ipcRenderer.removeListener("pix:side-chat:delta", handler);
+    },
     prompt: (message, streamingBehavior, imagePaths) =>
       ipcRenderer.invoke("pix:agent:prompt", message, streamingBehavior, imagePaths),
     clearQueue: () => ipcRenderer.invoke("pix:agent:queue-clear"),

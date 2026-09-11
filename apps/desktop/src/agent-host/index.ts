@@ -1,6 +1,7 @@
 import "./proxy-bootstrap.ts";
 import {
   createPixRuntime,
+  loadPromptImages,
   extractToolSessionImages,
   projectCustomEntry,
   projectCustomMessage,
@@ -18,7 +19,6 @@ import {
 } from "@pix/contracts";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { readFile } from "node:fs/promises";
-import { extname } from "node:path";
 import { ProviderOAuthCoordinator, type OAuthModelRuntime } from "./provider-oauth.ts";
 
 if (!process.send) throw new Error("Pix Agent Host requires a Node IPC parent");
@@ -44,6 +44,7 @@ let handle: PixRuntimeHandle | undefined;
 let unsubscribe: (() => void) | undefined;
 let sequence = 0;
 const toolArgsByCallId = new Map<string, unknown>();
+const textCompletions = new Map<string, AbortController>();
 
 function post(event: HostEvent): void {
   if (process.connected) process.send?.(event);
@@ -51,26 +52,6 @@ function post(event: HostEvent): void {
 
 const providerOAuth = new ProviderOAuthCoordinator(post);
 const testOAuthProviders = new Set<string>();
-
-const PROMPT_IMAGE_MIME_TYPES: Record<string, string> = {
-  ".gif": "image/gif",
-  ".jpeg": "image/jpeg",
-  ".jpg": "image/jpeg",
-  ".png": "image/png",
-  ".webp": "image/webp",
-};
-
-async function loadPromptImages(paths: string[]) {
-  return Promise.all(
-    paths.map(async (path) => {
-      const mimeType = PROMPT_IMAGE_MIME_TYPES[extname(path).toLowerCase()];
-      if (!mimeType) throw new Error(`Unsupported prompt image type: ${path}`);
-      const bytes = await readFile(path);
-      if (bytes.byteLength === 0) throw new Error(`Prompt image is empty: ${path}`);
-      return { type: "image" as const, data: bytes.toString("base64"), mimeType };
-    }),
-  );
-}
 
 function testOAuthRuntime(provider: string): OAuthModelRuntime | undefined {
   if (process.env.PIX_ENABLE_TEST_COMMANDS !== "1") return undefined;
@@ -1079,16 +1060,66 @@ async function handleCommand(command: HostCommand): Promise<void> {
       }
       case "util.complete-text": {
         if (!handle) throw new Error("Agent Host is not ready");
-        const text = await handle.completeText(command.prompt, {
-          ...(command.systemPrompt ? { systemPrompt: command.systemPrompt } : {}),
-          ...(command.model ? { model: command.model } : {}),
-        });
-        post({
-          protocolVersion: IPC_PROTOCOL_VERSION,
-          type: "util.text",
-          requestId: command.requestId,
-          text,
-        });
+        const controller = new AbortController();
+        textCompletions.set(command.requestId, controller);
+        try {
+          const text = await handle.completeText(command.prompt, {
+            ...(command.systemPrompt ? { systemPrompt: command.systemPrompt } : {}),
+            ...(command.model ? { model: command.model } : {}),
+            ...(command.messages ? { messages: command.messages } : {}),
+            signal: controller.signal,
+            ...(command.stream
+              ? {
+                  onDelta: (delta: string) =>
+                    post({
+                      protocolVersion: IPC_PROTOCOL_VERSION,
+                      type: "util.text-delta",
+                      requestId: command.requestId,
+                      delta,
+                    }),
+                }
+              : {}),
+          });
+          post({
+            protocolVersion: IPC_PROTOCOL_VERSION,
+            type: "util.text",
+            requestId: command.requestId,
+            text,
+          });
+        } finally {
+          textCompletions.delete(command.requestId);
+        }
+        break;
+      }
+      case "util.side-chat": {
+        if (!handle) throw new Error("Agent Host is not ready");
+        const controller = new AbortController();
+        textCompletions.set(command.requestId, controller);
+        try {
+          const text = await handle.sideChat(command.request, {
+            systemPrompt: command.systemPrompt,
+            signal: controller.signal,
+            onDelta: (delta) =>
+              post({
+                protocolVersion: IPC_PROTOCOL_VERSION,
+                type: "util.text-delta",
+                requestId: command.requestId,
+                delta,
+              }),
+          });
+          post({
+            protocolVersion: IPC_PROTOCOL_VERSION,
+            type: "util.text",
+            requestId: command.requestId,
+            text,
+          });
+        } finally {
+          textCompletions.delete(command.requestId);
+        }
+        break;
+      }
+      case "util.cancel-text": {
+        textCompletions.get(command.targetRequestId)?.abort();
         break;
       }
       case "extensionUi.respond": {

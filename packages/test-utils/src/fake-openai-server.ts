@@ -25,6 +25,8 @@ interface ChatMessage {
 }
 
 interface ChatRequest {
+  model?: string;
+  reasoning_effort?: string;
   messages?: ChatMessage[];
 }
 

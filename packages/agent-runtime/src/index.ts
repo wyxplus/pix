@@ -37,14 +37,15 @@ import type {
   SessionShareResult,
   SessionThreadSummary,
   SessionTreeView,
+  SideChatRequest,
   UpsertCustomProviderInput,
 } from "@pix/contracts";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, isAbsolute, join, win32 } from "node:path";
+import { basename, extname, isAbsolute, join, win32 } from "node:path";
 import {
   createPortableExtensionUiBridge,
   type ExtensionUiRequestEvent,
@@ -135,6 +136,25 @@ const MACOS_GITHUB_CLI_PATHS = ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"] as 
 
 /** Per-runtime OpenAI service_tier preference (not a pi session field). */
 const serviceTierByRuntime = new WeakMap<object, ServiceTier>();
+
+export async function loadPromptImages(paths: string[]) {
+  const types: Record<string, string> = {
+    ".gif": "image/gif",
+    ".jpeg": "image/jpeg",
+    ".jpg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+  };
+  return Promise.all(
+    paths.map(async (path) => {
+      const mimeType = types[extname(path).toLowerCase()];
+      if (!mimeType) throw new Error(`Unsupported prompt image type: ${path}`);
+      const bytes = await readFile(path);
+      if (!bytes.length) throw new Error(`Prompt image is empty: ${path}`);
+      return { type: "image" as const, data: bytes.toString("base64"), mimeType };
+    }),
+  );
+}
 
 function getRuntimeServiceTier(runtime: object): ServiceTier {
   return serviceTierByRuntime.get(runtime) ?? "default";
@@ -247,6 +267,8 @@ export interface CreatePixRuntimeOptions {
   sessionDir?: string;
   projectTrusted?: boolean;
   onExtensionUiRequest?: (request: ExtensionUiRequestEvent) => void;
+  /** Extra context for an ephemeral side conversation. */
+  appendSystemPrompt?: string;
 }
 
 export interface PixRuntimeHandle {
@@ -351,7 +373,17 @@ export interface PixRuntimeHandle {
   /** One-shot completion that does not write into the session transcript. */
   completeText(
     prompt: string,
-    options?: { systemPrompt?: string; model?: { provider: string; id: string } },
+    options?: {
+      systemPrompt?: string;
+      model?: { provider: string; id: string };
+      messages?: SideChatRequest["messages"];
+      signal?: AbortSignal;
+      onDelta?: (delta: string) => void;
+    },
+  ): Promise<string>;
+  sideChat(
+    request: SideChatRequest,
+    options: { systemPrompt: string; signal: AbortSignal; onDelta: (delta: string) => void },
   ): Promise<string>;
   dispose(): Promise<void>;
 }
@@ -1560,7 +1592,17 @@ export async function createPixRuntime(
       cwd,
       agentDir,
       settingsManager,
-      resourceLoaderOptions: { additionalExtensionPaths: temporaryExtensionPaths },
+      resourceLoaderOptions: {
+        additionalExtensionPaths: temporaryExtensionPaths,
+        ...(options.appendSystemPrompt
+          ? {
+              appendSystemPromptOverride: (base: string[]) => [
+                ...base,
+                options.appendSystemPrompt!,
+              ],
+            }
+          : {}),
+      },
     });
     // Keep only the latest service-layer config diagnostics for this session instance.
     configDiagnostics.length = 0;
@@ -2182,6 +2224,92 @@ export async function createPixRuntime(
       await runtime.services.modelRuntime.refresh();
       return projectModelSummaries(runtime.services);
     },
+    async sideChat(request, completion) {
+      // Use the same pi runtime/tools as the main composer, with an in-memory
+      // session and its own model/settings. Nothing is saved to the source thread.
+      const side = await createPixRuntime({
+        cwd: runtime.cwd,
+        agentDir: runtime.services.agentDir,
+        persistSession: false,
+        ...(request.model
+          ? { model: request.model }
+          : runtime.session.model
+            ? {
+                model: { provider: runtime.session.model.provider, id: runtime.session.model.id },
+              }
+            : {}),
+        tools: runtime.session.getActiveToolNames(),
+        projectTrusted:
+          request.accessMode === "full" || runtime.services.settingsManager.isProjectTrusted(),
+        appendSystemPrompt: completion.systemPrompt,
+      });
+      const abort = () => {
+        void side.runtime.session.abort().catch(() => undefined);
+      };
+      const unsubscribe = side.runtime.session.subscribe((event) => {
+        if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
+          completion.onDelta(event.assistantMessageEvent.delta);
+        }
+      });
+      completion.signal.addEventListener("abort", abort, { once: true });
+      try {
+        completion.signal.throwIfAborted();
+        if (request.thinkingLevel) side.setThinkingLevel(request.thinkingLevel);
+        if (request.serviceTier) side.setServiceTier(request.serviceTier);
+        const model = side.runtime.session.model;
+        if (!model) throw new Error("No model available for side chat");
+        const history = await Promise.all(
+          request.messages.slice(0, -1).map(async (message) =>
+            message.role === "user"
+              ? {
+                  role: "user" as const,
+                  timestamp: Date.now(),
+                  content: [
+                    { type: "text" as const, text: message.text },
+                    ...(await loadPromptImages(message.imagePaths ?? [])),
+                  ],
+                }
+              : {
+                  role: "assistant" as const,
+                  content: [{ type: "text" as const, text: message.text }],
+                  api: model.api,
+                  provider: model.provider,
+                  model: model.id,
+                  timestamp: Date.now(),
+                  stopReason: "stop" as const,
+                  usage: {
+                    input: 0,
+                    output: 0,
+                    cacheRead: 0,
+                    cacheWrite: 0,
+                    totalTokens: 0,
+                    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+                  },
+                },
+          ),
+        );
+        for (const message of history) side.runtime.session.sessionManager.appendMessage(message);
+        side.runtime.session.agent.state.messages = history;
+        const question = request.messages.at(-1)!;
+        const images = await loadPromptImages(question.imagePaths ?? []);
+        completion.signal.throwIfAborted();
+        await side.runtime.session.prompt(question.text, { images });
+        completion.signal.throwIfAborted();
+        const last = side.runtime.session.messages.at(-1);
+        if (
+          last?.role === "assistant" &&
+          (last.stopReason === "error" || last.stopReason === "aborted")
+        )
+          throw new Error(last.errorMessage || "Side conversation failed");
+        const answer = side.getLastAssistantText()?.trim();
+        if (!answer) throw new Error("模型未返回文本");
+        return answer;
+      } finally {
+        completion.signal.removeEventListener("abort", abort);
+        unsubscribe();
+        await side.dispose();
+      }
+    },
     async completeText(prompt, options) {
       const modelRuntime = runtime.services.modelRuntime;
       let model = runtime.session.model;
@@ -2193,12 +2321,57 @@ export async function createPixRuntime(
         model = models[0];
       }
       if (!model) throw new Error("没有可用模型，请先在设置中配置模型");
-      const result = await modelRuntime.completeSimple(model, {
+      const context: Parameters<typeof modelRuntime.completeSimple>[1] = {
         systemPrompt:
           options?.systemPrompt ??
           "You are a helpful assistant. Reply with only the requested text.",
-        messages: [{ role: "user", content: prompt, timestamp: Date.now() }],
-      });
+        messages: options?.messages?.map((message) =>
+          message.role === "user"
+            ? { role: "user" as const, content: message.text, timestamp: Date.now() }
+            : {
+                role: "assistant" as const,
+                content: [{ type: "text" as const, text: message.text }],
+                api: model.api,
+                provider: model.provider,
+                model: model.id,
+                timestamp: Date.now(),
+                stopReason: "stop" as const,
+                usage: {
+                  input: 0,
+                  output: 0,
+                  cacheRead: 0,
+                  cacheWrite: 0,
+                  totalTokens: 0,
+                  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+                },
+              },
+        ) ?? [{ role: "user", content: prompt, timestamp: Date.now() }],
+      };
+      const stream = options?.onDelta
+        ? modelRuntime.streamSimple(
+            model,
+            context,
+            options.signal ? { signal: options.signal } : {},
+          )
+        : undefined;
+      if (stream) {
+        for await (const event of stream) {
+          if (event.type === "text_delta") options?.onDelta?.(event.delta);
+        }
+      }
+      const result = stream
+        ? await stream.result()
+        : await modelRuntime.completeSimple(
+            model,
+            context,
+            options?.signal ? { signal: options.signal } : {},
+          );
+      if (result.stopReason === "error" || result.stopReason === "aborted") {
+        throw new Error(
+          result.errorMessage ||
+            (result.stopReason === "aborted" ? "Response stopped" : "Model request failed"),
+        );
+      }
       const text = (result.content ?? [])
         .filter((part): part is { type: "text"; text: string } => part.type === "text")
         .map((part) => part.text)
@@ -2548,6 +2721,10 @@ function projectModelSummaries(services: AgentSessionServices): ModelSummary[] {
       id: model.id,
       name: model.name ?? model.id,
       reasoning: Boolean(model.reasoning),
+      availableThinkingLevels: availableThinkingLevelsForModel(
+        resolveModelWithCatalogThinking(model, services),
+      ),
+      availableServiceTiers: availableServiceTiersForModel(model, catalogModelPeers(services)),
       api: String(model.api),
       input: model.input.filter(
         (input): input is "text" | "image" => input === "text" || input === "image",

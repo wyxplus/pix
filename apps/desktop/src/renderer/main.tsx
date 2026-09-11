@@ -53,6 +53,13 @@ import { ThreadHeader } from "./components/ThreadHeader.tsx";
 import { PiTuiTerminal, preloadPiTuiTerminal } from "./components/PiTuiTerminal.tsx";
 import { WindowCaptionButtons } from "./components/WindowCaptionButtons.tsx";
 import { SessionTimelineScroller } from "./components/SessionTimelineContent.tsx";
+import { SelectionSideChat } from "./components/SelectionSideChat.tsx";
+import { useSideChatStore } from "./store/side-chat-store.ts";
+import {
+  appendSelectedText,
+  type MessageSelection,
+  type SelectionAction,
+} from "./lib/text-selection.ts";
 import { MessageScrollerButton } from "@/components/ui/message-scroller";
 import { buildShellCommands } from "./lib/commands.ts";
 import { isPromptImagePath, promptWithAttachedPaths } from "./lib/composer-suggestions.ts";
@@ -420,6 +427,22 @@ function App() {
   const setLastFailure = useShellStore((s) => s.setLastFailure);
   const clearAppError = useShellStore((s) => s.clearAppError);
   const setView = useShellStore((s) => s.setView);
+  const [sideChatCloseId, setSideChatCloseId] = useState<string | null>(null);
+  function requestSideChatClose(id: string) {
+    if (useSideChatStore.getState().chats[id]) setSideChatCloseId(id);
+  }
+  function finishSideChatClose(confirmed: boolean) {
+    if (confirmed && sideChatCloseId) {
+      useSideChatStore.getState().close(sideChatCloseId);
+      if (
+        !Object.values(useSideChatStore.getState().chats).some(
+          (chat) => chat.sessionKey === sessionKey,
+        )
+      )
+        requestAnimationFrame(() => composerRef.current?.focus());
+    }
+    setSideChatCloseId(null);
+  }
   const setPackages = useShellStore((s) => s.setPackages);
   const setResources = useShellStore((s) => s.setResources);
   const setEcoLoading = useShellStore((s) => s.setEcoLoading);
@@ -445,11 +468,60 @@ function App() {
   const timelineScrollRef = useRef<HTMLDivElement | null>(null);
   const composerDockRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  useEffect(
+    () =>
+      window.pix.agent.onSideChatDelta(({ requestId, delta }) => {
+        useSideChatStore.getState().delta(requestId, delta);
+      }),
+    [],
+  );
+
+  function addSelectionToComposer(text: string) {
+    setPrompt(appendSelectedText(useShellStore.getState().prompt, text));
+    requestAnimationFrame(() => {
+      composerRef.current?.focus();
+      const length = composerRef.current?.value.length ?? 0;
+      composerRef.current?.setSelectionRange(length, length);
+    });
+  }
+
+  async function handleSelectionAction(action: SelectionAction, selection: MessageSelection) {
+    if (action === "add") {
+      addSelectionToComposer(selection.text);
+      return;
+    }
+    if (!snapshot) return;
+    try {
+      await useSideChatStore.getState().hydrate();
+    } catch (error) {
+      reportAppError(error, t(locale, "selection.saveFailed"));
+      return;
+    }
+    const sourceIndex = timeline.findIndex((item) => item.id === selection.messageId);
+    const sourceMessages = timeline
+      .slice(0, Math.max(0, sourceIndex))
+      .filter((item) => item.kind === "user" || item.kind === "assistant")
+      .slice(-6)
+      .map((item) => ({ role: item.kind as "user" | "assistant", text: item.text }));
+    const store = useSideChatStore.getState();
+    const chatId = store.open(sessionKey, snapshot.sessionId, selection, sourceMessages, {
+      ...(snapshot.model
+        ? { model: { provider: snapshot.model.provider, id: snapshot.model.id } }
+        : {}),
+      thinkingLevel: displayThinkingLevel,
+      serviceTier: displayServiceTier,
+      accessMode,
+    });
+    setEnvPanelOpen(false);
+    if (action === "explain") {
+      void store.send(chatId, t(locale, "selection.explainPrompt"));
+    }
+  }
   const pendingComposerFocus = useRef(false);
   /** Floating composer height — timeline bottom inset so last rows stay above the input. */
   const [composerDockHeight, setComposerDockHeight] = useState(200);
   const [modelOptions, setModelOptions] = useState<
-    Array<{ provider: string; id: string; name: string }>
+    import("./components/Composer.tsx").ComposerModelOption[]
   >([]);
   const [recentWorkspaces, setRecentWorkspaces] = useState<string[]>([]);
   /** Sessions keyed by project cwd — all projects, no switch required to browse. */
@@ -602,6 +674,23 @@ function App() {
   }, [snapshot?.cwd]);
   /** Session identity — used to pin scroll + remount timeline rows on switch. */
   const sessionKey = snapshot?.sessionFile ?? snapshot?.sessionId ?? "";
+  const selectionChatId = useSideChatStore((state) => state.activeBySession[sessionKey]);
+  const selectionChat = useSideChatStore((state) =>
+    selectionChatId ? state.chats[selectionChatId] : undefined,
+  );
+  const selectionChatOpen = Boolean(selectionChat) && !envPanelOpen;
+  const sideChatPersistenceError = useSideChatStore((state) => state.persistenceError);
+  useEffect(() => {
+    if (snapshot?.sessionId)
+      useSideChatStore.getState().bindSession(sessionKey, snapshot.sessionId);
+  }, [sessionKey, snapshot?.sessionId, selectionChatId]);
+  useEffect(() => {
+    if (selectionChatId) setEnvPanelOpen(false);
+  }, [sessionKey, selectionChatId, setEnvPanelOpen]);
+  useEffect(() => {
+    if (sideChatPersistenceError)
+      reportAppError(new Error(sideChatPersistenceError), t(locale, "selection.saveFailed"));
+  }, [sideChatPersistenceError]);
   const foregroundMarkerState = sessionKey
     ? sessionMarkers[sessionRunKey(sessionKey)]?.state
     : undefined;
@@ -923,6 +1012,7 @@ function App() {
         if (cancelled) return;
 
         setBoot(t(loc(), "boot.config"));
+        await useSideChatStore.getState().hydrate();
         await refreshConversationSessions();
         if (cancelled) return;
         // Auto-resume starts the host before this window subscribes to events,
@@ -1458,6 +1548,12 @@ function App() {
           provider: model.provider,
           id: model.id,
           name: model.name,
+          ...(model.availableThinkingLevels
+            ? { availableThinkingLevels: model.availableThinkingLevels }
+            : {}),
+          ...(model.availableServiceTiers
+            ? { availableServiceTiers: model.availableServiceTiers }
+            : {}),
           ...(model.source ? { source: model.source } : {}),
         })),
     );
@@ -3315,6 +3411,15 @@ function App() {
                 contentModeSwitchLocked={running}
                 onToggleContentMode={() => void toggleContentModeSurface()}
                 extensionUi={extensionUiState}
+                sideChatOpen={selectionChatOpen}
+                onToggleSideChat={
+                  contentMode === "chat" && selectionChat
+                    ? () => {
+                        if (envPanelOpen) setEnvPanelOpen(false);
+                        else requestSideChatClose(selectionChat.id);
+                      }
+                    : undefined
+                }
               />
             ) : (
               <div
@@ -3330,7 +3435,7 @@ function App() {
               - dock: would cover content if floated → take flex space and squeeze
               - auto-hide when column cannot fit min content + panel
             */}
-            <div className="relative flex min-h-0 min-w-0 flex-1 flex-row">
+            <div className="thread-conversation-layout relative flex min-h-0 min-w-0 flex-1 flex-row">
               {/*
                 Terminal mode: pi TUI fills the pane *below* ThreadHeader (not full
                 window). Chat mode: MessageScroller timeline + sticky composer.
@@ -3391,6 +3496,7 @@ function App() {
                     editingLocked={running}
                     endRef={timelineEndRef}
                     onEditUser={(item, text) => void editUserAndResend(item, text)}
+                    onSelectionAction={handleSelectionAction}
                     onForkAssistant={(item) => {
                       // pi fork: new session file from this assistant entry
                       void forkThread(item.entryId);
@@ -3555,11 +3661,27 @@ function App() {
                 </div>
               )}
 
+              {contentMode === "chat" && selectionChatOpen && selectionChat && snapshot ? (
+                <SelectionSideChat
+                  key={sessionKey}
+                  locale={locale}
+                  chatId={selectionChat.id}
+                  snapshot={snapshot}
+                  modelOptions={modelOptions}
+                  accessVisibility={accessVisibility}
+                  packages={packages}
+                  workspacePath={workspacePath}
+                  onClose={requestSideChatClose}
+                  onAdd={(text) => {
+                    addSelectionToComposer(text);
+                  }}
+                />
+              ) : null}
               <EnvPanel
                 locale={locale}
                 cwd={workspacePath ?? snapshot?.cwd}
                 layout={envPanelLayout}
-                open={contentMode === "chat" && envPanelOpen}
+                open={contentMode === "chat" && envPanelOpen && !selectionChatOpen}
                 onOpenSettings={() => {
                   setSettingsSection("environment");
                   setView("settings");
@@ -3840,6 +3962,20 @@ function App() {
           void editUserAndResend(pending.item, pending.text, { skipConfirm: true });
         }}
       />
+
+      {sideChatCloseId ? (
+        <ConfirmDialog
+          open
+          title={t(locale, "selection.closeTitle")}
+          message={`${(useSideChatStore.getState().chats[sideChatCloseId]?.messages.find((message) => message.role === "user")?.text || useSideChatStore.getState().chats[sideChatCloseId]?.selection.text || "").slice(0, 100)}\n\n${t(locale, "selection.closeMessage")}`}
+          confirmLabel={t(locale, "selection.closeConfirm")}
+          cancelLabel={t(locale, "common.cancel")}
+          danger
+          testId="side-chat-close-confirm"
+          onConfirm={() => finishSideChatClose(true)}
+          onCancel={() => finishSideChatClose(false)}
+        />
+      ) : null}
 
       <ProjectTrustDialog
         open={showProjectTrustPrompt}

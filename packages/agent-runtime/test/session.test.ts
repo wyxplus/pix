@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -55,6 +55,140 @@ afterEach(async () => {
       .splice(0)
       .map((directory) => rm(directory, { recursive: true, force: true })),
   );
+});
+
+describe("utility completions", () => {
+  it("runs side chat with independent model, images, file tools and no recoverable session", async () => {
+    const paths = await fixture("pix-side-runtime-");
+    await writeFile(paths.toolPath, "Side attachment content\n");
+    const imagePath = join(paths.project, "sample.png");
+    await writeFile(
+      imagePath,
+      Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+        "base64",
+      ),
+    );
+    const server = new FakeOpenAiServer({ toolPath: paths.toolPath });
+    await server.start();
+    await writeModels(paths.agentDir, server.baseUrl);
+    const configPath = join(paths.agentDir, "models.json");
+    const config = JSON.parse(await readFile(configPath, "utf8"));
+    config.providers["pix-fake"].models.push({
+      ...config.providers["pix-fake"].models[0],
+      id: "pix-alt",
+      name: "Alternative",
+      reasoning: true,
+      input: ["text", "image"],
+    });
+    await writeFile(configPath, JSON.stringify(config));
+    const handle = await createPixRuntime({
+      cwd: paths.project,
+      agentDir: paths.agentDir,
+      model: { provider: "pix-fake", id: "pix-fake" },
+      persistSession: true,
+      tools: ["read"],
+    });
+    try {
+      const before = JSON.stringify(handle.historyMessages());
+      const sessions = (await handle.listSessions()).map((session) => session.id);
+      const request = {
+        requestId: "side",
+        sessionId: handle.runtime.session.sessionId,
+        selection: "Passage",
+        context: "Source",
+        model: { provider: "pix-fake", id: "pix-alt" },
+        thinkingLevel: "high",
+        messages: [
+          {
+            role: "user" as const,
+            text: "Use the tool to read the attached file",
+            imagePaths: [imagePath],
+          },
+        ],
+      };
+      const deltas: string[] = [];
+      await handle.sideChat(request, {
+        systemPrompt: "Selected reference",
+        signal: new AbortController().signal,
+        onDelta: (delta) => deltas.push(delta),
+      });
+      expect(deltas.join("")).toContain("Tool result received.");
+      const payload = server.requests.at(-1)!;
+      expect(payload.model).toBe("pix-alt");
+      expect(payload.reasoning_effort).toBe("high");
+      expect(JSON.stringify(payload.messages)).toContain("data:image/png;base64,");
+      expect(
+        JSON.stringify(payload.messages?.filter((message) => message.role === "tool")),
+      ).toContain("Side attachment content");
+      expect(handle.snapshot().model?.id).toBe("pix-fake");
+      expect(JSON.stringify(handle.historyMessages())).toBe(before);
+      expect((await handle.listSessions()).map((session) => session.id)).toEqual(sessions);
+      const controller = new AbortController();
+      await expect(
+        handle.sideChat(
+          { ...request, messages: [{ role: "user", text: "abort" }] },
+          {
+            systemPrompt: "Source",
+            signal: controller.signal,
+            onDelta: () => controller.abort(),
+          },
+        ),
+      ).rejects.toThrow();
+      expect(JSON.stringify(handle.historyMessages())).toBe(before);
+    } finally {
+      await handle.dispose();
+      await server.stop();
+    }
+  }, 30000);
+  it("supports role history and cancellation without modifying the source session", async () => {
+    const paths = await fixture("pix-side-text-");
+    const server = new FakeOpenAiServer({ toolPath: paths.toolPath });
+    await server.start();
+    await writeModels(paths.agentDir, server.baseUrl);
+    const handle = await createPixRuntime({
+      cwd: paths.project,
+      agentDir: paths.agentDir,
+      model: { provider: "pix-fake", id: "pix-fake" },
+      persistSession: true,
+    });
+    try {
+      const before = JSON.stringify(handle.runtime.session.sessionManager.getEntries());
+      expect(await handle.completeText("A short answer")).toBe("Pix fake model response.");
+      const deltas: string[] = [];
+      const answer = await handle.completeText("", {
+        systemPrompt: "Reference passage",
+        messages: [
+          { role: "user", text: "Original side question" },
+          { role: "assistant", text: "Earlier answer" },
+          { role: "user", text: "Follow-up" },
+        ],
+        onDelta: (delta) => deltas.push(delta),
+      });
+      expect(deltas.join("").trim()).toBe(answer);
+      expect(
+        server.requests.at(-1)?.messages?.filter((message) => message.role !== "system"),
+      ).toEqual([
+        { role: "user", content: "Original side question" },
+        { role: "assistant", content: "Earlier answer" },
+        { role: "user", content: "Follow-up" },
+      ]);
+      const controller = new AbortController();
+      await expect(
+        handle.completeText("abort", {
+          signal: controller.signal,
+          onDelta: (delta) => {
+            expect(delta).toContain("Waiting for abort");
+            controller.abort();
+          },
+        }),
+      ).rejects.toThrow();
+      expect(JSON.stringify(handle.runtime.session.sessionManager.getEntries())).toBe(before);
+    } finally {
+      await handle.dispose();
+      await server.stop();
+    }
+  });
 });
 
 describe("R02 session replacement", () => {

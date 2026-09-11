@@ -143,8 +143,18 @@ export function pathForFile(_file: File): string {
   return "";
 }
 void getCurrentWindow().onDragDropEvent(({ payload }) => {
-  if (payload.type === "drop")
-    window.dispatchEvent(new CustomEvent("pix:native-drop", { detail: payload.paths }));
+  if (payload.type === "drop") {
+    const hit = document.elementFromPoint(
+      payload.position.x / window.devicePixelRatio,
+      payload.position.y / window.devicePixelRatio,
+    );
+    const target =
+      hit?.closest("[data-composer-surface]")?.getAttribute("data-composer-surface") ??
+      (hit?.closest(".selection-side-chat") ? "side" : "main");
+    window.dispatchEvent(
+      new CustomEvent("pix:native-drop", { detail: { paths: payload.paths, target } }),
+    );
+  }
 });
 
 // Electron's CSS app-region is not implemented by WebKit or WebView2.
