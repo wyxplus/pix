@@ -2,7 +2,7 @@ import { test as base, expect, type Browser, type Page } from "@playwright/test"
 import { launchTauriHarness } from "./tauri-harness.ts";
 import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { FakeOpenAiServer } from "@pix/test-utils";
 
@@ -129,6 +129,14 @@ async function launchPixApp(
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (value !== undefined) env[key] = value;
+  }
+  if (process.platform === "linux") {
+    // Native editor launches are intercepted by the harness, but production target
+    // discovery still needs an installed CLI for file links with line numbers.
+    const editorBin = join(root, "editor-bin");
+    await mkdir(editorBin);
+    await writeFile(join(editorBin, "code"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    env.PATH = [editorBin, env.PATH].filter(Boolean).join(delimiter);
   }
   Object.assign(env, {
     HOME: home,
