@@ -20,16 +20,24 @@ export const TARGETS = {
 function files(dir) {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const path = join(dir, entry.name);
-    if (entry.isDirectory()) return entry.name.endsWith(".app") ? [] : files(path);
-    return [path];
+    if (entry.isFile()) return [path];
+    if (!entry.isDirectory() || entry.name.endsWith(".app")) return [];
+    // Tauri writes installers directly inside each format's directory. Never
+    // recurse into AppDir or application resources and publish bundled tools.
+    return readdirSync(path, { withFileTypes: true })
+      .filter((child) => child.isFile())
+      .map((child) => join(path, child.name));
   });
 }
 export function collect(source, destination, target) {
   if (!TARGETS[target]) throw new Error(`Unsupported target ${target}`);
   mkdirSync(destination, { recursive: true });
-  const candidates = files(source).filter((path) =>
-    /\.(dmg|app\.tar\.gz|AppImage|deb|rpm|exe|msi)(\.sig)?$/.test(path),
-  );
+  const format = target.includes("darwin")
+    ? /\.(dmg|app\.tar\.gz)(\.sig)?$/
+    : target.includes("windows")
+      ? /\.(exe|msi)(\.sig)?$/
+      : /\.(AppImage|deb|rpm)(\.sig)?$/;
+  const candidates = files(source).filter((path) => format.test(path));
   const installer = target.includes("darwin")
     ? /\.dmg$/
     : target.includes("windows")

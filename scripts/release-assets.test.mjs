@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -41,6 +41,28 @@ await test("unsigned manual releases do not advertise an updater payload", () =>
       writeFileSync(join(root, `manifest-${target}.json`), JSON.stringify({ target, platform }));
     manifest(root, "num-scope/pix", "v0.7.7");
     assert.ok(!existsSync(join(root, "latest.json")));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+await test("Linux assets exclude internal AppDir tools and other platform binaries", () => {
+  const root = mkdtempSync(join(tmpdir(), "pix-release-"));
+  try {
+    const source = join(root, "bundle");
+    const appimage = join(source, "appimage");
+    const embedded = join(appimage, "Pix.AppDir", "usr", "lib", "sidecar");
+    const out = join(root, "out");
+    mkdirSync(embedded, { recursive: true });
+    writeFileSync(join(appimage, "Pix_0.7.8.AppImage"), "installer");
+    writeFileSync(join(appimage, "OpenConsole.exe"), "wrong platform");
+    for (const name of ["OpenConsole.exe", "winpty-agent.exe", "fixture.deb"])
+      writeFileSync(join(embedded, name), "bundled dependency");
+    collect(source, out, "x86_64-unknown-linux-gnu");
+    assert.deepEqual(readdirSync(out).sort(), [
+      "manifest-x86_64-unknown-linux-gnu.json",
+      "x86_64-unknown-linux-gnu-Pix_0.7.8.AppImage",
+    ]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
