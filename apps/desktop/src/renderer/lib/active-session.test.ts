@@ -36,9 +36,16 @@ describe("active session identity", () => {
 
   it("prefers the session ID and normalizes path aliases when IDs are unavailable", () => {
     expect(threadMatchesSession({ id: "old", path: current.sessionFile }, current)).toBe(false);
+    expect(threadMatchesSession({ id: "", path: current.sessionFile }, current)).toBe(true);
     expect(threadMatchesSession({ id: "", path: "/private/var/sessions/new.jsonl" }, current)).toBe(
-      true,
+      process.platform === "darwin",
     );
+    expect(
+      threadMatchesSession(
+        { id: "", path: "C:\\Sessions\\new.jsonl" },
+        { sessionId: "new", sessionFile: "c:/sessions/new.jsonl" },
+      ),
+    ).toBe(true);
   });
 
   it("keeps the current selection when an old list finishes after navigation or model recovery", () => {

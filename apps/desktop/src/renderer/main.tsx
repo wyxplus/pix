@@ -677,7 +677,7 @@ function App() {
     }
   }, [snapshot?.cwd]);
   /** Session identity — used to pin scroll + remount timeline rows on switch. */
-  const sessionKey = snapshot?.sessionFile ?? snapshot?.sessionId ?? "";
+  const sessionKey = sessionKeyFromSnapshot(snapshot);
   const selectionChatId = useSideChatStore((state) => state.activeBySession[sessionKey]);
   const selectionChat = useSideChatStore((state) =>
     selectionChatId ? state.chats[selectionChatId] : undefined,

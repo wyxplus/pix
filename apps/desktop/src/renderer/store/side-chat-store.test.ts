@@ -174,6 +174,34 @@ describe("side chat lifecycle", () => {
     expect(get().activeBySession).toEqual({ main: second, another: other });
   });
 
+  it("preserves tabs and active selection across session path aliases and legacy archives", async () => {
+    const alias = "C:\\Sessions\\main.jsonl";
+    const key = "c:/sessions/main.jsonl";
+    const first = open(alias);
+    const second = open(key);
+    const other = open("c:/sessions/other.jsonl");
+    get().setDraft(first, "保留草稿");
+    expect(get().chats[first]?.sessionKey).toBe(key);
+    expect(get().activeBySession[key]).toBe(second);
+    get().activate(first);
+    await get().flush();
+
+    // Older archives stored the snapshot's original path spelling.
+    saved.chats[first]!.sessionKey = alias;
+    delete saved.activeBySession[key];
+    saved.activeBySession[alias] = first;
+    store = createSideChatStore(storage);
+    await get().hydrate();
+    expect(get().activeBySession).toEqual({ [key]: first, "c:/sessions/other.jsonl": other });
+    expect(get().chats[first]).toMatchObject({ sessionKey: key, draft: "保留草稿" });
+    get().bindSession(alias, "resumed-id");
+    expect(get().chats[first]?.sessionId).toBe("resumed-id");
+    expect(get().chats[second]?.sessionId).toBe("resumed-id");
+    expect(get().chats[other]?.sessionId).not.toBe("resumed-id");
+    get().close(first);
+    expect(get().activeBySession[key]).toBe(second);
+  });
+
   it("restores an interrupted answer as stopped and can retry using the rebound source session", async () => {
     const id = open();
     const oldStore = store;

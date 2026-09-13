@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { normalizePathKey } from "@pix/contracts";
 import type { SavedSideChat, SideChatArchive, PixDesktopApi } from "@pix/contracts";
 import type { MessageSelection } from "../lib/text-selection.ts";
 import { unwrapRemoteIpcError } from "../../shared/ipc-error.ts";
@@ -59,12 +60,18 @@ export function createSideChatStore(storage: SideChatStorage) {
                 id,
                 {
                   ...chat,
+                  sessionKey: normalizePathKey(chat.sessionKey),
                   status: chat.status === "streaming" ? ("stopped" as const) : chat.status,
                   requestId: undefined,
                 },
               ]),
             );
-            const activeBySession = { ...archive.activeBySession };
+            const activeBySession = Object.fromEntries(
+              Object.entries(archive.activeBySession).map(([key, id]) => [
+                normalizePathKey(key),
+                id,
+              ]),
+            );
             for (const chat of Object.values(chats)) activeBySession[chat.sessionKey] ??= chat.id;
             set({ chats, activeBySession, hydrated: true, persistenceError: "" });
           })
@@ -87,6 +94,7 @@ export function createSideChatStore(storage: SideChatStorage) {
           }));
       },
       bindSession(sessionKey, sessionId) {
+        sessionKey = normalizePathKey(sessionKey);
         for (const chat of Object.values(get().chats)) {
           if (chat.sessionKey === sessionKey && chat.sessionId !== sessionId)
             update(chat.id, (current) => ({ ...current, sessionId }));
@@ -100,6 +108,7 @@ export function createSideChatStore(storage: SideChatStorage) {
         settings = { thinkingLevel: "off", serviceTier: "default", accessMode: "default" },
       ) {
         if (!get().hydrated) throw new Error("Side chats have not loaded yet");
+        sessionKey = normalizePathKey(sessionKey);
         const id = crypto.randomUUID();
         set((state) => ({
           activeBySession: { ...state.activeBySession, [sessionKey]: id },

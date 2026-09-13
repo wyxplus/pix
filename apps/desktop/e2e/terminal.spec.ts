@@ -1,8 +1,14 @@
 import type { Page } from "@playwright/test";
+import { normalizePathKey } from "@pix/contracts";
 import { conversationSessionButtons, expect, sendPrompt, startHost, test } from "./fixtures.ts";
 
 async function terminalStatus(page: Page) {
-  return page.evaluate(() => window.pix.terminal.status());
+  const status = await page.evaluate(() => window.pix.terminal.status());
+  return {
+    ...status,
+    sessionFile: normalizePathKey(status.sessionFile),
+    parkedSessionFiles: status.parkedSessionFiles?.map((path) => normalizePathKey(path)),
+  };
 }
 
 /** Inspect real Ghostty paint health — not just "surface-ready" attribute. */
@@ -122,7 +128,7 @@ async function expectTerminalPainted(page: Page, sessionFile: string): Promise<v
   });
   await expect
     .poll(() => terminalStatus(page), { timeout: 45_000 })
-    .toMatchObject({ open: true, suspended: false, sessionFile });
+    .toMatchObject({ open: true, suspended: false, sessionFile: normalizePathKey(sessionFile) });
 
   // Real paint: grid + canvas + bytes/pixels — not just the ready flag.
   await expect
@@ -326,7 +332,7 @@ test.describe("Embedded pi TUI", () => {
       .toMatchObject({
         open: false,
         suspended: true,
-        sessionFile: sessionA.sessionFile,
+        sessionFile: normalizePathKey(sessionA.sessionFile),
       });
 
     // A: chat → terminal resume must repaint (not blank).
@@ -349,7 +355,10 @@ test.describe("Embedded pi TUI", () => {
     await expectTerminalPainted(page, sessionB.sessionFile!);
     await expect
       .poll(() => terminalStatus(page))
-      .toMatchObject({ parkedSessionFiles: [sessionA.sessionFile], sessionCount: 2 });
+      .toMatchObject({
+        parkedSessionFiles: [normalizePathKey(sessionA.sessionFile)],
+        sessionCount: 2,
+      });
 
     // Terminal ↔ terminal hop A: promote warm PTY + full paint.
     await switchConversationByPath(page, sessionA.sessionFile!);
@@ -360,7 +369,10 @@ test.describe("Embedded pi TUI", () => {
     expect(paintA3.hostW).toBeGreaterThanOrEqual(80);
     await expect
       .poll(() => terminalStatus(page))
-      .toMatchObject({ parkedSessionFiles: [sessionB.sessionFile], sessionCount: 2 });
+      .toMatchObject({
+        parkedSessionFiles: [normalizePathKey(sessionB.sessionFile)],
+        sessionCount: 2,
+      });
 
     // Hop B again — paint still valid.
     await switchConversationByPath(page, sessionB.sessionFile!);
@@ -384,7 +396,7 @@ test.describe("Embedded pi TUI", () => {
       .toMatchObject({
         open: false,
         suspended: true,
-        sessionFile: sessionA.sessionFile,
+        sessionFile: normalizePathKey(sessionA.sessionFile),
         parkedSessionFiles: [],
         sessionCount: 1,
       });
