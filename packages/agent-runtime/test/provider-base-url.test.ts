@@ -9,6 +9,23 @@ import {
 import { normalizeProviderBaseUrl } from "../src/provider-base-url.ts";
 
 describe("normalizeProviderBaseUrl", () => {
+  it.each([
+    ["openai-completions", "/proxy/v1/chat/completions", "/proxy/v1"],
+    ["openai-completions", "/proxy/v1/completions", "/proxy/v1"],
+    ["openai-responses", "/proxy/v1/responses", "/proxy/v1"],
+    ["google-generative-ai", "/proxy/v1beta/models", "/proxy/v1beta"],
+    ["google-generative-ai", "/proxy/v1/models", "/proxy/v1"],
+    ["google-generative-ai", "/proxy/v1beta", "/proxy/v1beta"],
+    ["google-generative-ai", "/v1", "/v1"],
+  ])("preserves version segments for %s at %s", (api, endpoint, base) => {
+    const normalized = normalizeProviderBaseUrl(
+      `https://gateway.invalid${endpoint}?tenant=fixture`,
+      api,
+    );
+    expect(normalized).toBe(`https://gateway.invalid${base}?tenant=fixture`);
+    expect(normalizeProviderBaseUrl(normalized, api)).toBe(normalized);
+  });
+
   describe("anthropic-messages", () => {
     it("strips trailing /v1 so SDK does not produce /v1/v1/messages", () => {
       expect(normalizeProviderBaseUrl("https://anyrouter.top/v1", "anthropic-messages")).toBe(

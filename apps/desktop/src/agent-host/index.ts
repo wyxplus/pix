@@ -20,6 +20,18 @@ import {
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { readFile } from "node:fs/promises";
 import { ProviderOAuthCoordinator, type OAuthModelRuntime } from "./provider-oauth.ts";
+import { MessageIdentity } from "./message-identity.ts";
+
+const messageIdentity = new MessageIdentity();
+
+function sessionHistory(runtimeHandle: PixRuntimeHandle) {
+  const manager = runtimeHandle.runtime.session.sessionManager;
+  return messageIdentity.history(
+    runtimeHandle.historyMessages(),
+    manager.getBranch(),
+    runtimeHandle.runtime.session.sessionId,
+  );
+}
 
 if (!process.send) throw new Error("Pix Agent Host requires a Node IPC parent");
 process.on("disconnect", () => {
@@ -347,8 +359,16 @@ function projectRuntimeEvent(event: AgentSessionEvent): RuntimeEvent | undefined
 function bindRuntimeEvents(runtimeHandle: PixRuntimeHandle): void {
   unsubscribe?.();
   unsubscribe = runtimeHandle.runtime.session.subscribe((event) => {
+    const messageId = messageIdentity.observe(event);
     const projected = projectRuntimeEvent(event);
     if (!projected) return;
+    if (
+      messageId &&
+      (projected.type === "user.message" ||
+        projected.type === "message.delta" ||
+        projected.type === "thinking.delta")
+    )
+      projected.messageId = messageId;
     post({
       protocolVersion: IPC_PROTOCOL_VERSION,
       type: "runtime.event",
@@ -485,7 +505,7 @@ async function handleCommand(command: HostCommand): Promise<void> {
           requestId: command.requestId,
           snapshot: handle.snapshot(sequence),
           threads: await handle.listSessions(),
-          history: handle.historyMessages(),
+          history: sessionHistory(handle),
         });
         break;
       }
@@ -498,7 +518,7 @@ async function handleCommand(command: HostCommand): Promise<void> {
           requestId: command.requestId,
           snapshot: handle.snapshot(sequence),
           threads: await handle.listSessions(),
-          history: handle.historyMessages(),
+          history: sessionHistory(handle),
         });
         break;
       }
@@ -514,7 +534,7 @@ async function handleCommand(command: HostCommand): Promise<void> {
           requestId: command.requestId,
           snapshot: handle.snapshot(sequence),
           threads: await handle.listSessions(),
-          history: handle.historyMessages(),
+          history: sessionHistory(handle),
         });
         break;
       }
@@ -552,7 +572,7 @@ async function handleCommand(command: HostCommand): Promise<void> {
           requestId: command.requestId,
           snapshot: handle.snapshot(sequence),
           threads: await handle.listSessions(),
-          history: handle.historyMessages(),
+          history: sessionHistory(handle),
         };
         if (result.selectedText !== undefined) opened.selectedText = result.selectedText;
         post(opened);
@@ -581,7 +601,7 @@ async function handleCommand(command: HostCommand): Promise<void> {
           requestId: command.requestId,
           snapshot: { ...nav.snapshot, sequence },
           threads: await handle.listSessions(),
-          history: handle.historyMessages(),
+          history: sessionHistory(handle),
           cancelled: nav.cancelled,
         };
         // pi returns editorText when target is a user message (rewinds to parent).
@@ -623,7 +643,7 @@ async function handleCommand(command: HostCommand): Promise<void> {
           requestId: command.requestId,
           snapshot: handle.snapshot(sequence),
           threads: await handle.listSessions(),
-          history: handle.historyMessages(),
+          history: sessionHistory(handle),
         });
         break;
       }
@@ -669,7 +689,7 @@ async function handleCommand(command: HostCommand): Promise<void> {
           requestId: command.requestId,
           snapshot: handle.snapshot(sequence),
           threads: await handle.listSessions(),
-          history: handle.historyMessages(),
+          history: sessionHistory(handle),
         });
         break;
       }

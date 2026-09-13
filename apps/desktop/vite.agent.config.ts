@@ -6,6 +6,8 @@ import { defineConfig, type Plugin } from "vite-plus";
 const external = [
   "@earendil-works/pi-coding-agent",
   "@silvia-odwyer/photon-node",
+  // Keep this CJS dependency on disk so Node supplies its native require().
+  "proper-lockfile",
   ...builtinModules,
   ...builtinModules.map((name) => `node:${name}`),
 ];

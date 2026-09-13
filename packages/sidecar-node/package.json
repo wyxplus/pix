@@ -9,6 +9,7 @@
     "@earendil-works/pi-coding-agent": "catalog:",
     "@silvia-odwyer/photon-node": "catalog:",
     "node-pty": "catalog:",
+    "proper-lockfile": "catalog:",
     "undici": "^7.24.0"
   }
 }

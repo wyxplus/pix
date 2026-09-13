@@ -579,6 +579,7 @@ export function projectSessionHistory(
       }
     } else if (row.role === "toolResult") {
       const raw = message as {
+        toolCallId?: string;
         args?: unknown;
         arguments?: unknown;
         input?: unknown;
@@ -620,6 +621,7 @@ export function projectSessionHistory(
         toolName,
         isError: row.isError === true,
       };
+      if (typeof raw.toolCallId === "string") item.toolCallId = raw.toolCallId;
       if (images.length > 0) item.images = images;
       if (args !== undefined) item.args = args;
       if (command) item.command = command;
@@ -1952,8 +1954,14 @@ export async function createPixRuntime(
       if (apiKey) {
         await persistProviderApiKey(runtime.services.agentDir, providerId, apiKey);
       }
-      // If the provider id was renamed, drop the old credential slot.
-      if (previousProvider && previousProvider !== providerId) {
+      // A model move must not revoke credentials shared by its siblings. Without
+      // an explicit replacement key, retain the old slot rather than lose it.
+      if (
+        previousProvider &&
+        previousProvider !== providerId &&
+        apiKey &&
+        !config.providers.some((entry) => entry.provider === previousProvider)
+      ) {
         await deleteProviderCredential(runtime.services.agentDir, previousProvider);
         try {
           await runtime.services.modelRuntime.removeRuntimeApiKey(previousProvider);

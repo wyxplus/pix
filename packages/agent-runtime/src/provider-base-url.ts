@@ -74,24 +74,19 @@ export function normalizeProviderBaseUrl(baseUrl: string, api: ProviderBaseUrlAp
     }
     case "openai-completions": {
       // SDK: baseURL + "/chat/completions"
-      path = stripPathSuffixes(path, [
-        "/v1/chat/completions",
-        "/chat/completions",
-        "/v1/completions",
-        "/completions",
-      ]);
+      path = stripPathSuffixes(path, ["/chat/completions", "/completions"]);
       if (!path) path = "/v1";
       break;
     }
     case "openai-responses": {
       // SDK: baseURL + "/responses"
-      path = stripPathSuffixes(path, ["/v1/responses", "/responses"]);
+      path = stripPathSuffixes(path, ["/responses"]);
       if (!path) path = "/v1";
       break;
     }
     case "google-generative-ai": {
       // pi: baseUrl includes version; apiVersion forced to ""
-      path = stripPathSuffixes(path, ["/v1beta/models", "/v1/models", "/v1beta", "/v1"]);
+      path = stripPathSuffixes(path, ["/models"]);
       // Custom path prefixes (not just a version segment) are preserved.
       if (!path) path = "/v1beta";
       break;

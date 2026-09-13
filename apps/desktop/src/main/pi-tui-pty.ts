@@ -144,6 +144,13 @@ export class PiTuiPtyController {
     };
   }
 
+  workspaceCwds(): string[] {
+    return [
+      ...(this.#live ? [this.#live.cwd] : []),
+      ...[...this.#parked.values()].map((entry) => entry.cwd),
+    ];
+  }
+
   async open(plan: PiTuiLaunchPlan, callbacks: PiTuiPtyCallbacks): Promise<PiTuiPtyOpenResult> {
     // One open at a time: concurrent hops (unmount+mount) previously interleaved
     // park/spawn and left the second session dead on macOS.

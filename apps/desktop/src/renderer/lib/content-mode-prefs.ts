@@ -1,3 +1,4 @@
+import { normalizePathKey } from "@pix/contracts";
 /**
  * Desktop content surface preference: React chat vs embedded pi TUI.
  *
@@ -24,9 +25,7 @@ export function isContentMode(value: unknown): value is ContentMode {
  * Same /private collapse as shell-store.sessionRunKey so chat⇄terminal hops keep prefs.
  */
 export function contentModeSessionKey(sessionFile: string): string {
-  let p = sessionFile.replace(/\\/g, "/").replace(/\/+$/, "").trim().toLowerCase();
-  if (p.startsWith("/private/")) p = p.slice("/private".length);
-  return p;
+  return normalizePathKey(sessionFile);
 }
 
 export function loadContentMode(): ContentMode {

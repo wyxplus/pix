@@ -12,7 +12,15 @@ export async function launchTauriHarness(
 ) {
   let page: Page | undefined;
   const native = {
-    window: { scale: 1, maximized: false, minimized: false, closed: false, dragStarts: 0 },
+    window: {
+      scale: 1,
+      maximized: false,
+      minimized: false,
+      hidden: false,
+      closed: false,
+      trayAvailable: true,
+      dragStarts: 0,
+    },
     nativeTheme: { themeSource: "system" },
     shell: {
       openPath: async (_path: string) => "",
@@ -100,6 +108,14 @@ export async function launchTauriHarness(
   await page.exposeBinding("__pixTestInvoke", async (_source, command: string, args: any) => {
     if (command === "pix_invoke") return client.invoke(args.channel, ...args.args);
     if (command === "pix_update_configured") return false;
+    if (command === "pix_window_resolve_close") {
+      if (args.action === "tray") {
+        if (!native.window.trayAvailable) throw new Error("Pix tray icon is unavailable");
+        native.window.hidden = true;
+      } else if (args.action === "quit") native.window.closed = true;
+      else throw new Error("Unknown close action");
+      return;
+    }
     if (command === "plugin:window|is_maximized") return native.window.maximized;
     if (command === "plugin:window|toggle_maximize") {
       native.window.maximized = !native.window.maximized;
@@ -115,7 +131,13 @@ export async function launchTauriHarness(
     }
     if (command === "plugin:window|start_dragging") native.window.dragStarts++;
     if (command === "plugin:window|minimize") native.window.minimized = true;
-    if (command === "plugin:window|close") native.window.closed = true;
+    if (command === "plugin:window|close") {
+      const intercepted = await page!.evaluate(() =>
+        (window as any).__pixTestNativeEvent("tauri://close-requested"),
+      );
+      if (!intercepted) native.window.closed = true;
+    }
+    if (command === "plugin:window|destroy") native.window.closed = true;
     if (command.startsWith("plugin:window|")) return;
     throw new Error(`Unhandled Tauri test invocation: ${command}`);
   });
@@ -149,6 +171,16 @@ export async function launchTauriHarness(
       },
     };
     scope.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
+    scope.__pixTestNativeEvent = (event: string) => {
+      let delivered = false;
+      for (const [id, listener] of events) {
+        if (listener.event === event) {
+          delivered = true;
+          callbacks.get(listener.handler)?.({ event, id, payload: null });
+        }
+      }
+      return delivered;
+    };
     scope.__pixTestEvent = (payload: unknown) => {
       for (const [id, listener] of events) {
         if (listener.event === "pix:event")

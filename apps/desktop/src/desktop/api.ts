@@ -1,4 +1,4 @@
-import { ipcRenderer, pathForFile } from "./transport.ts";
+import { ipcRenderer, onWindowCloseRequested, pathForFile } from "./transport.ts";
 import type {
   AppUpdateStatus,
   HostEvent,
@@ -30,6 +30,8 @@ const api: PixDesktopApi = {
     minimize: () => ipcRenderer.invoke("pix:window:minimize"),
     toggleMaximize: () => ipcRenderer.invoke("pix:window:toggle-maximize"),
     close: () => ipcRenderer.invoke("pix:window:close"),
+    onCloseRequested: onWindowCloseRequested,
+    resolveClose: (action) => ipcRenderer.invoke("pix:window:resolve-close", action),
     isMaximized: () => ipcRenderer.invoke("pix:window:is-maximized"),
     onStateChange(listener) {
       const handler = (_event: undefined, state: { isMaximized: boolean }) => listener(state);

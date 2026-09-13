@@ -176,13 +176,15 @@ describe("shouldReuseForegroundThread", () => {
 
 describe("per-session running", () => {
   it("normalizes session keys", () => {
-    expect(sessionRunKey("/tmp/Foo/")).toBe("/tmp/foo");
+    expect(sessionRunKey("/tmp/Foo/")).toBe(process.platform === "win32" ? "/tmp/foo" : "/tmp/Foo");
     expect(sessionKeyFromSnapshot({ sessionFile: "/tmp/A.jsonl", sessionId: "id-1" })).toBe(
-      "/tmp/a.jsonl",
+      process.platform === "win32" ? "/tmp/a.jsonl" : "/tmp/A.jsonl",
     );
     // macOS firmlink: host / TUI / sidebar paths must share one marker key.
     expect(sessionRunKey("/private/var/folders/xx/session.jsonl")).toBe(
-      "/var/folders/xx/session.jsonl",
+      process.platform === "darwin"
+        ? "/var/folders/xx/session.jsonl"
+        : "/private/var/folders/xx/session.jsonl",
     );
     expect(sessionRunKey("/var/folders/xx/session.jsonl")).toBe("/var/folders/xx/session.jsonl");
   });
@@ -434,9 +436,15 @@ describe("per-session running", () => {
       backgroundLiveStreams: {},
       history: [],
     });
-    useShellStore.getState().applyLiveStreamEvent({ type: "user.message", content: "hi" }, ["hi"], {
-      sequence: 1,
-    });
+    useShellStore
+      .getState()
+      .applyLiveStreamEvent(
+        { type: "user.message", content: "hi", messageId: "user-current" },
+        ["hi"],
+        {
+          sequence: 1,
+        },
+      );
     useShellStore.getState().applyLiveStreamEvent({ type: "message.delta", delta: "partial" }, [], {
       sequence: 2,
     });
@@ -462,12 +470,16 @@ describe("per-session running", () => {
     useShellStore.getState().applySessionOpen({
       snapshot: snapshotA,
       threads: [],
-      history: [{ role: "user", text: "hi" }],
+      history: [
+        { role: "user", text: "hi", messageId: "user-current" },
+        { role: "assistant", text: "partial", messageId: "earlier" },
+      ],
     });
     const items = useShellStore.getState().liveStream.items;
     expect(items.some((item) => item.kind === "user")).toBe(false);
     expect(items.some((item) => item.kind === "assistant" && item.text.includes("partial"))).toBe(
       true,
     );
+    expect(items.find((item) => item.kind === "assistant")).toMatchObject({ text: "partial more" });
   });
 });

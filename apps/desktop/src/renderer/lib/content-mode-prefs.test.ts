@@ -54,7 +54,9 @@ describe("content-mode-prefs", () => {
     expect(contentModeSessionKey(a)).toBe(contentModeSessionKey("c:/work/a.jsonl"));
     // macOS /private collapse keeps terminal preference across TUI realpaths
     saveContentModeForSession("/var/folders/xx/s.jsonl", "terminal");
-    expect(loadContentModeForSession("/private/var/folders/xx/s.jsonl")).toBe("terminal");
+    expect(loadContentModeForSession("/private/var/folders/xx/s.jsonl")).toBe(
+      process.platform === "darwin" ? "terminal" : "chat",
+    );
   });
 
   it("defaults unknown sessions to chat (not global last-used)", () => {

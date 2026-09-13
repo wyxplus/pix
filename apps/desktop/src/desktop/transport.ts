@@ -6,6 +6,13 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import type { AppUpdateStatus } from "@pix/contracts";
 
 type Handler = (event: undefined, payload: any) => void;
+
+export function onWindowCloseRequested(listener: () => void): Promise<() => void> {
+  return getCurrentWindow().onCloseRequested((event) => {
+    event.preventDefault();
+    listener();
+  });
+}
 const listeners = new Map<string, Set<Handler>>();
 function dispatch(channel: string, payload: unknown) {
   for (const handler of listeners.get(channel) ?? []) handler(undefined, payload);
@@ -95,6 +102,8 @@ export const ipcRenderer = {
         return win.isMaximized();
       case "pix:window:close":
         return win.close();
+      case "pix:window:resolve-close":
+        return invoke("pix_window_resolve_close", { action: args[0] });
       case "pix:window:is-maximized":
         return win.isMaximized();
       case "pix:app:get-update-status":

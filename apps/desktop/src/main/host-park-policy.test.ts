@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
+import { mkdtemp, mkdir, rm, symlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   findParkedSessionKeyByCwd,
   idleParkedCount,
@@ -21,8 +24,31 @@ function ref(partial: Partial<ParkedHostRef> & { sessionKey: string }): ParkedHo
 }
 
 describe("host-park-policy", () => {
+  it.skipIf(process.platform === "win32")(
+    "does not promote another case-distinct workspace",
+    () => {
+      const parked = [ref({ sessionKey: "upper", workspaceCwd: "/home/fixture/Project" })];
+      expect(findParkedSessionKeyByCwd(parked, "/home/fixture/project")).toBeUndefined();
+      expect(findParkedSessionKeyByCwd(parked, "/home/fixture/Project")).toBe("upper");
+    },
+  );
   it("normalizes cwd keys across separators and trailing slashes", () => {
     expect(normalizeHostCwdKey("C:\\proj\\a\\")).toBe(normalizeHostCwdKey("C:/proj/a"));
+  });
+
+  it("resolves aliases consistently for existing worktrees and missing subdirectories", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "pix-cwd-key-"));
+    try {
+      const actual = join(dir, "actual");
+      const alias = join(dir, "alias");
+      await mkdir(actual);
+      await symlink(actual, alias, process.platform === "win32" ? "junction" : "dir");
+      expect(normalizeHostCwdKey(join(alias, "future", "nested"))).toBe(
+        `${normalizeHostCwdKey(actual)}/future/nested`,
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it("finds a parked host by workspace cwd", () => {

@@ -169,7 +169,13 @@ for (const platform of ["Win32", "Linux x86_64", "MacIntel"]) {
     await page.getByTestId("window-minimize").click();
     expect(await pix.app.evaluate(({ window }) => window.minimized)).toBe(true);
     await page.getByTestId("window-close").click();
-    expect(await pix.app.evaluate(({ window }) => window.closed)).toBe(true);
+    if (platform === "Win32") {
+      await expect(page.getByTestId("window-close-dialog")).toBeVisible();
+      expect(await pix.app.evaluate(({ window }) => window.closed)).toBe(false);
+      await page.getByTestId("window-close-action-quit").check();
+      await page.getByTestId("window-close-confirm").click();
+    }
+    await expect.poll(() => pix.app.evaluate(({ window }) => window.closed)).toBe(true);
     expect(await pix.app.evaluate(({ window }) => window.dragStarts)).toBe(0);
   });
 }

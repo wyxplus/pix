@@ -327,14 +327,114 @@ describe("live stream (append-only)", () => {
 });
 
 describe("liveStreamNotCoveredByHistory", () => {
+  it("replaces a running tool when its matching completed result overtakes the event", () => {
+    const live = applyRuntimeEventToLiveStream(
+      emptyLiveStream(),
+      { type: "tool.started", toolCallId: "same-call", toolName: "bash", args: {} },
+      [],
+    );
+    const covered = liveStreamNotCoveredByHistory(live, [
+      { role: "tool", text: "done", toolCallId: "same-call" },
+    ]);
+    expect(covered.items).toEqual([]);
+    expect(
+      applyRuntimeEventToLiveStream(
+        covered,
+        {
+          type: "tool.completed",
+          toolCallId: "same-call",
+          toolName: "bash",
+          output: "done",
+          isError: false,
+        },
+        [],
+        { sequence: 5 },
+      ).items,
+    ).toEqual([]);
+  });
+
+  it("retains a current reply when an older turn has the same prefix or identical text", () => {
+    const state = applyRuntimeEventToLiveStream(
+      emptyLiveStream(),
+      { type: "message.delta", delta: "结果：100，接下来检查成本。", messageId: "current" },
+      [],
+    );
+    for (const text of ["结果：100", "结果：100，接下来检查成本。"]) {
+      expect(
+        liveStreamNotCoveredByHistory(state, [{ role: "assistant", text, messageId: "earlier" }])
+          .items,
+      ).toEqual(state.items);
+    }
+    expect(
+      liveStreamNotCoveredByHistory(state, [
+        { role: "assistant", text: "结果：100", messageId: "current" },
+      ]).items,
+    ).toEqual(state.items);
+  });
+
+  it("matches completed tools by call ID instead of name", () => {
+    const state = applyRuntimeEventToLiveStream(
+      emptyLiveStream(),
+      {
+        type: "tool.completed",
+        toolCallId: "new",
+        toolName: "bash",
+        output: "new output",
+        isError: false,
+      },
+      [],
+    );
+    expect(
+      liveStreamNotCoveredByHistory(state, [
+        { role: "tool", toolName: "bash", toolCallId: "old", text: "old output" },
+      ]).items,
+    ).toEqual(state.items);
+    expect(
+      liveStreamNotCoveredByHistory(state, [
+        { role: "tool", toolName: "bash", toolCallId: "new", text: "new output" },
+      ]).items,
+    ).toEqual([]);
+  });
+
+  it("does not recreate a covered message from delayed deltas after a snapshot", () => {
+    const state = liveStreamNotCoveredByHistory(emptyLiveStream(), [
+      { role: "assistant", text: "Hello", messageId: "completed" },
+    ]);
+    const next = applyRuntimeEventToLiveStream(
+      state,
+      { type: "message.delta", delta: "lo", messageId: "completed" },
+      [],
+      { sequence: 20 },
+    );
+    expect(next.items).toEqual([]);
+    expect(next.seenSequences).toContain(20);
+    expect(
+      applyRuntimeEventToLiveStream(
+        next,
+        { type: "message.delta", delta: "Hello", messageId: "new-turn" },
+        [],
+      ).items,
+    ).toHaveLength(1);
+  });
+
   it("drops user/assistant rows already present in history and keeps open tools", () => {
     let state = emptyLiveStream();
-    state = applyRuntimeEventToLiveStream(state, { type: "user.message", content: "hi" }, ["hi"], {
-      sequence: 1,
-    });
-    state = applyRuntimeEventToLiveStream(state, { type: "message.delta", delta: "hello" }, [], {
-      sequence: 2,
-    });
+    state = applyRuntimeEventToLiveStream(
+      state,
+      { type: "user.message", content: "hi", messageId: "user-1" },
+      ["hi"],
+      {
+        sequence: 1,
+      },
+    );
+    state = applyRuntimeEventToLiveStream(
+      state,
+      { type: "message.delta", delta: "hello", messageId: "assistant-1" },
+      [],
+      {
+        sequence: 2,
+      },
+    );
     state = applyRuntimeEventToLiveStream(
       state,
       { type: "tool.started", toolCallId: "t1", toolName: "bash", args: {} },
@@ -342,8 +442,8 @@ describe("liveStreamNotCoveredByHistory", () => {
       { sequence: 3 },
     );
     const next = liveStreamNotCoveredByHistory(state, [
-      { role: "user", text: "hi" },
-      { role: "assistant", text: "hello" },
+      { role: "user", text: "hi", messageId: "user-1" },
+      { role: "assistant", text: "hello", messageId: "assistant-1" },
     ]);
     expect(next.items.some((item) => item.kind === "user" || item.kind === "assistant")).toBe(
       false,

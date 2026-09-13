@@ -88,6 +88,31 @@ export default function (pi: any) {
       );
       const sessions = await client.invoke("pix:session:list");
       assert.ok(sessions.threads.length >= 1);
+      const active = sessions.threads.find((thread) => thread.active) ?? sessions.threads[0];
+      const opened = await client.invoke("pix:session:switch", active.path);
+      const streamed = events
+        .filter(
+          (event) => event.channel === "pix:host:event" && event.payload.type === "runtime.event",
+        )
+        .map((event) => event.payload.event);
+      const textIds = [
+        ...new Set(
+          streamed
+            .filter((event) => event.type === "message.delta")
+            .map((event) => event.messageId),
+        ),
+      ];
+      assert.ok(textIds.length > 0 && textIds.every((id) => typeof id === "string"));
+      for (const id of textIds)
+        assert.ok(
+          opened.history.some((row) => row.messageId === id),
+          "Live assistant identity must survive session promotion into persisted history",
+        );
+      for (const event of streamed.filter((event) => event.type === "tool.completed"))
+        assert.ok(
+          opened.history.some((row) => row.toolCallId === event.toolCallId),
+          "History must retain the exact tool call identity",
+        );
       assert.ok(await client.invoke("pix:settings:get"));
       assert.equal(await client.invoke("pix:appearance:set-app-scale", 120), 120);
       assert.ok(nativeCalls.some((c) => c.method === "window.scale" && c.params.scale === 1.2));
