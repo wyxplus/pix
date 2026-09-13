@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { checkVersion } from "./set-version.mjs";
 const root = resolve(import.meta.dirname, "..");
 export const TARGETS = {
   "aarch64-apple-darwin": "darwin-aarch64",
@@ -78,13 +79,8 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const [command, ...args] = process.argv.slice(2);
   if (command === "collect") collect(args[0], args[1], args[args.indexOf("--target") + 1]);
   else if (command === "manifest") manifest(...args);
-  else if (command === "check-version") {
-    const version = JSON.parse(
-      readFileSync(join(root, "apps/desktop/package.json"), "utf8"),
-    ).version;
-    if (args[0] !== `v${version}`)
-      throw new Error(`Tag ${args[0]} does not match desktop ${version}`);
-  } else
+  else if (command === "check-version") checkVersion(root, args[0]);
+  else
     throw new Error(
       "Usage: release-assets.mjs collect <bundle> <out> --target <triple> | manifest <dir> <owner/repo> <tag> | check-version <tag>",
     );

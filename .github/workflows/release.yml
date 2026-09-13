@@ -3,9 +3,14 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
 concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: true
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 permissions:
   contents: read
 jobs:
@@ -35,6 +40,8 @@ jobs:
       APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - uses: pnpm/action-setup@v6
         with:
           version: 11.15.1
@@ -54,8 +61,11 @@ jobs:
       - name: Prepare bundled Node and tool runtimes
         run: pnpm --filter @pix/desktop exec node scripts/prepare-sidecar.mjs --release
       - name: Verify release version
-        if: github.ref_type == 'tag'
-        run: node scripts/release-assets.mjs check-version "${{ github.ref_name }}"
+        if: inputs.tag != '' || github.ref_type == 'tag'
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: node scripts/release-assets.mjs check-version "$RELEASE_TAG"
+        shell: bash
       - name: Verify shared Node tools and native dependencies
         run: pnpm --filter @pix/desktop test:shared-node
       - name: Verify packaged Sidecar and TypeScript extensions
@@ -91,12 +101,14 @@ jobs:
           retention-days: 14
   publish:
     needs: package
-    if: github.ref_type == 'tag'
+    if: inputs.tag != '' || github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -106,11 +118,16 @@ jobs:
           pattern: pix-*
           merge-multiple: true
       - name: Validate artifacts and create signed updater manifest
-        run: node scripts/release-assets.mjs manifest release-assets "${{ github.repository }}" "${{ github.ref_name }}"
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: node scripts/release-assets.mjs manifest release-assets "$GITHUB_REPOSITORY" "$RELEASE_TAG"
+      - name: Generate checksums
+        run: cd release-assets && sha256sum * > SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          name: ${{ inputs.tag || github.ref_name }}
+          prerelease: ${{ contains(inputs.tag || github.ref_name, '-') }}
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: release-assets/*

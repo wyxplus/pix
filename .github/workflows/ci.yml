@@ -3,6 +3,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -56,6 +57,7 @@ jobs:
       - run: pnpm check:rust
       - run: pnpm --filter @pix/desktop exec node scripts/sidecar-smoke.test.mjs
       - run: pnpm test:release-assets
+      - run: pnpm test:release-version
       - name: Install browser test engines
         run: pnpm --filter @pix/desktop exec playwright install --with-deps chromium webkit
       - name: Browser and Sidecar regression

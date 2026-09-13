@@ -84,7 +84,19 @@ Build on each target OS/architecture. Copying an unrelated architecture's Node b
 
 ## Updates and releases
 
-App version lives in `apps/desktop/package.json`; `tauri.conf.json` reads it directly. `pnpm version:set 0.8.0` also updates the Rust package and lockfile. Tag names must match the desktop version.
+Releases are started manually: open [Actions → Publish release](https://github.com/wyxplus/pix/actions/workflows/publish-release.yml), select **Run workflow** on **main**, choose a version option, and run it. Ordinary commits and merged pull requests only run CI; they do not publish a release.
+
+| Version option              | Behavior                                                                                                                                                   |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `auto` (default)            | Use the source version if it has not been tagged; otherwise increment the highest stable patch version. The first release is `0.7.8`, followed by `0.7.9`. |
+| `patch` / `minor` / `major` | Increment the chosen component, e.g. `0.7.8` → `0.7.9` / `0.8.0` / `1.0.0`.                                                                                |
+| `version`                   | Supply an exact stable version such as `0.8.0`; overrides the bump option and rejects existing or older versions.                                          |
+
+The workflow first runs the full CI checks, then synchronizes the desktop package, Rust package and lockfile, commits any version change to `main`, and atomically pushes the matching `vX.Y.Z` tag. It builds all four platforms and publishes a [GitHub Release](https://github.com/wyxplus/pix/releases) with installers, generated release notes and `SHA256SUMS.txt`. If `main` changes during validation, publishing stops; run the workflow again to validate the new commit. The workflow needs `contents: write` (declared in the workflow); no personal access token is needed. Repository rules must allow its version commit and tag.
+
+App version lives in `apps/desktop/package.json`; `tauri.conf.json` reads it directly. For local version changes, `pnpm version:set 0.8.0` also updates the Rust package and lockfile. The root workspace package is private and retains its independent version. Release checks reject tags that do not match all three desktop version files.
+
+If packaging fails after tagging, use **Re-run failed jobs** on the existing workflow run. For a full rebuild of an existing tag, run `gh workflow run release.yml --ref vX.Y.Z`. The **Release** workflow also accepts manually pushed version tags; running it on a branch only builds downloadable Actions artifacts. The manual publishing workflow calls the reusable Release workflow directly because [tags pushed with `GITHUB_TOKEN` do not trigger another push workflow](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow).
 
 The release workflow builds macOS arm64/x64, Windows x64 and Linux x64 installers. Signed updates use Tauri's verified `latest.json` feed, replacing Electron YAML/blockmap feeds.
 
@@ -100,7 +112,7 @@ The workflow embeds the public key and repository-specific endpoint, generates s
 
 For local signed packaging, set `PIX_UPDATER_PUBLIC_KEY`, optionally `PIX_UPDATER_ENDPOINT`, and `TAURI_SIGNING_PRIVATE_KEY`, then enable `bundle.createUpdaterArtifacts` in the Tauri build configuration. Never commit private signing keys.
 
-CI runs checks, business tests, builds, Rust checks, sidecar integration and browser regression. Release jobs build installers; this migration does not publish a release automatically.
+CI runs checks, business tests, builds, Rust checks, sidecar integration, browser regression and release-script tests. A manually requested release is published only after validation and all platform builds succeed.
 
 ## Migration notes
 

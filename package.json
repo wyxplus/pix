@@ -20,6 +20,7 @@
     "package": "vp run --no-cache @pix/desktop#package",
     "version:set": "node scripts/set-version.mjs",
     "test:release-assets": "node scripts/release-assets.test.mjs",
+    "test:release-version": "node --test scripts/next-version.test.mjs scripts/set-version.test.mjs",
     "check:rust": "pnpm --filter @pix/desktop check:rust"
   },
   "devDependencies": {
