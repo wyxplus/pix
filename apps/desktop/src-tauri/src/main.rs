@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod native;
+mod path_security;
 mod sidecar;
 mod tray;
 use serde_json::{json, Value};
@@ -20,7 +21,11 @@ async fn pix_invoke(
 
 #[tauri::command]
 fn pix_update_configured() -> bool {
-    option_env!("PIX_UPDATER_PUBLIC_KEY").is_some_and(|key| !key.is_empty())
+    path_security::updater_settings(
+        option_env!("PIX_UPDATER_PUBLIC_KEY"),
+        option_env!("PIX_UPDATER_ENDPOINT"),
+    )
+    .is_some()
 }
 
 fn main() {
@@ -41,9 +46,10 @@ fn main() {
                 .build(),
         )
         .plugin(tauri_plugin_process::init());
-    if let Some(key) = option_env!("PIX_UPDATER_PUBLIC_KEY").filter(|key| !key.is_empty()) {
-        let endpoint = option_env!("PIX_UPDATER_ENDPOINT")
-            .unwrap_or("https://github.com/num-scope/pix/releases/latest/download/latest.json");
+    if let Some((key, endpoint)) = path_security::updater_settings(
+        option_env!("PIX_UPDATER_PUBLIC_KEY"),
+        option_env!("PIX_UPDATER_ENDPOINT"),
+    ) {
         context.config_mut().plugins.0.insert(
             "updater".into(),
             json!({"pubkey":key,"endpoints":[endpoint]}),
@@ -53,6 +59,7 @@ fn main() {
     let application = builder
         .invoke_handler(tauri::generate_handler![pix_invoke, pix_update_configured, tray::pix_window_resolve_close])
         .setup(|app| {
+            app.manage(path_security::DroppedPaths::default());
             let state = sidecar::Sidecar::start(app.handle().clone())?;
             app.manage(state);
             if cfg!(windows) {
@@ -64,6 +71,9 @@ fn main() {
             if let Some(window) = app.get_webview_window("main") {
                 let handle = app.handle().clone();
                 window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) = event {
+                        handle.state::<path_security::DroppedPaths>().record(paths);
+                    }
                     if matches!(event, tauri::WindowEvent::Resized(_)) {
                         if let Some(window) = handle.get_webview_window("main") {
                             let _ = handle.emit("pix:event", json!({"channel":"pix:window:state", "payload": {"isMaximized":window.is_maximized().unwrap_or(false)}}));

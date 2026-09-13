@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { access, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { expect, startHost, test } from "./fixtures.ts";
+import { expect, selectWorkspace, startHost, test } from "./fixtures.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -44,10 +44,13 @@ async function createLocalGitFixture(root: string) {
 
 test.describe("Desktop Git E2E", () => {
   test("manages isolated local branches, remotes, status, and worktrees", async ({ page, pix }) => {
-    const { repo, remote } = await createLocalGitFixture(pix.root);
-    const worktreeRoot = join(pix.root, "managed-worktrees");
+    const { repo: unselectedRepo, remote } = await createLocalGitFixture(pix.root);
+    const unselectedRoot = join(pix.root, "managed-worktrees");
+    await mkdir(unselectedRoot);
 
     await startHost(page);
+    const repo = await selectWorkspace(pix, page, unselectedRepo);
+    const worktreeRoot = await selectWorkspace(pix, page, unselectedRoot);
     const initial = await page.evaluate(async (cwd) => {
       await window.pix.workspace.openPath(cwd, { resumeRecent: false });
       const [context, branches, prefs] = await Promise.all([
@@ -202,11 +205,13 @@ test.describe("Desktop Git E2E", () => {
       isMainWorktree: false,
       worktreePath: worktrees.first.path,
     });
-    expect(normalizeMacPathAlias(worktrees.first.context.mainWorktreePath)).toBe(repo);
+    expect(normalizeMacPathAlias(worktrees.first.context.mainWorktreePath)).toBe(
+      normalizeMacPathAlias(repo),
+    );
     expect(
       worktrees.listed.some(
         (worktree) =>
-          normalizeMacPathAlias(worktree.path) === repo &&
+          normalizeMacPathAlias(worktree.path) === normalizeMacPathAlias(repo) &&
           worktree.main === true &&
           worktree.branch === "pix/release",
       ),
@@ -214,25 +219,28 @@ test.describe("Desktop Git E2E", () => {
     expect(
       worktrees.listed.some(
         (worktree) =>
-          normalizeMacPathAlias(worktree.path) === worktrees.first.path &&
+          normalizeMacPathAlias(worktree.path) === normalizeMacPathAlias(worktrees.first.path) &&
           worktree.branch === "pix/first-worktree",
       ),
     ).toBe(true);
     expect(
       worktrees.managed.some(
-        (worktree) => normalizeMacPathAlias(worktree.path) === worktrees.first.path,
+        (worktree) =>
+          normalizeMacPathAlias(worktree.path) === normalizeMacPathAlias(worktrees.first.path),
       ),
     ).toBe(true);
     expect(worktrees.mainRemovalError).toMatch(/不能删除主工作树/);
     expect(await exists(worktrees.first.path)).toBe(false);
     expect(
       worktrees.afterPrune.some(
-        (worktree) => normalizeMacPathAlias(worktree.path) === worktrees.second.path,
+        (worktree) =>
+          normalizeMacPathAlias(worktree.path) === normalizeMacPathAlias(worktrees.second.path),
       ),
     ).toBe(true);
     expect(
       worktrees.afterPrune.some(
-        (worktree) => normalizeMacPathAlias(worktree.path) === worktrees.first.path,
+        (worktree) =>
+          normalizeMacPathAlias(worktree.path) === normalizeMacPathAlias(worktrees.first.path),
       ),
     ).toBe(false);
     expect(worktrees.removed).toEqual({ removed: worktrees.second.path });

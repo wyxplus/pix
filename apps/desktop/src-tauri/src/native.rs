@@ -11,6 +11,9 @@ pub async fn request(app: AppHandle, method: &str, params: Value) -> Result<Valu
     }
     let window = app.get_webview_window("main").ok_or("Main window closed")?;
     match method {
+        "paths.was-dropped" => Ok(json!(app
+            .state::<crate::path_security::DroppedPaths>()
+            .contains(params["path"].as_str().ok_or("Missing path")?))),
         "dialog.open" | "dialog.save" => {
             let save = method == "dialog.save";
             tauri::async_runtime::spawn_blocking(move || {
@@ -81,10 +84,55 @@ pub async fn request(app: AppHandle, method: &str, params: Value) -> Result<Valu
         }
         "shell.open-path" => {
             let path = params["path"].as_str().ok_or("Missing path")?;
+            let path = crate::path_security::validate_file(path, true)?;
             app.opener()
                 .open_path(path, None::<&str>)
                 .map_err(|e| e.to_string())?;
             Ok(json!(""))
+        }
+        "shell.open-text" => {
+            let path = crate::path_security::validate_file(
+                params["path"].as_str().ok_or("Missing path")?,
+                false,
+            )?;
+            let editor = if cfg!(target_os = "macos") {
+                "TextEdit"
+            } else if cfg!(windows) {
+                "notepad.exe"
+            } else {
+                "gedit"
+            };
+            app.opener()
+                .open_path(path, Some(editor))
+                .map_err(|e| e.to_string())?;
+            Ok(Value::Null)
+        }
+        "shell.open-editor" => {
+            crate::path_security::validate_file(
+                params["path"].as_str().ok_or("Missing path")?,
+                false,
+            )?;
+            let executable = params["executable"]
+                .as_str()
+                .ok_or("Missing editor executable")?;
+            let args: Vec<&str> = params["args"]
+                .as_array()
+                .ok_or("Missing editor arguments")?
+                .iter()
+                .map(|arg| arg.as_str().ok_or("Invalid editor argument"))
+                .collect::<Result<_, _>>()?;
+            let mut child = std::process::Command::new(executable)
+                .args(args)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .map_err(|e| e.to_string())?;
+            // Reap without holding the file-open RPC for the editor's entire lifetime.
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
+            Ok(Value::Null)
         }
         "shell.reveal" => {
             app.opener()

@@ -2,6 +2,7 @@ import "./proxy-bootstrap.ts";
 import {
   createPixRuntime,
   loadPromptImages,
+  promptImageRoots,
   extractToolSessionImages,
   projectCustomEntry,
   projectCustomMessage,
@@ -426,7 +427,10 @@ async function handleCommand(command: HostCommand): Promise<void> {
         } = {};
         if (command.streamingBehavior) promptOptions.streamingBehavior = command.streamingBehavior;
         if (command.imagePaths?.length) {
-          promptOptions.images = await loadPromptImages(command.imagePaths);
+          promptOptions.images = await loadPromptImages(
+            command.imagePaths,
+            promptImageRoots(handle.runtime.cwd),
+          );
         }
         await handle.runtime.session.prompt(
           command.message,

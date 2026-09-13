@@ -80,6 +80,7 @@ import { CreateWorktreeDialog } from "./CreateWorktreeDialog.tsx";
 import { t, type Locale } from "../lib/i18n.ts";
 import type { ServiceTierId } from "../lib/service-tier.ts";
 import { ComposerModelPicker } from "./ComposerModelPicker.tsx";
+import { isTextareaBoundaryLine, PromptHistory } from "../lib/prompt-history.ts";
 import {
   addResourceQuery,
   applyPathTokenCompletion,
@@ -135,6 +136,9 @@ export interface ComposerProps {
   contextHeader?: ReactNode;
   locale: Locale;
   prompt: string;
+  /** Sent user prompts from this conversation, oldest first. */
+  promptHistory?: readonly string[];
+  promptHistoryKey?: string;
   onPromptChange: (value: string) => void;
   onSubmit: (event?: FormEvent) => void;
   onAbort: () => void;
@@ -515,6 +519,15 @@ export function Composer(props: ComposerProps) {
   const openTriggerRef = useRef<ComposerTrigger | null>(null);
   const [caret, setCaret] = useState(0);
   const [refTokens, setRefTokens] = useState<ComposerRefToken[]>([]);
+  const promptHistoryRef = useRef(
+    new PromptHistory((text: string) => ({
+      text,
+      refs: [] as ComposerRefToken[],
+    })),
+  );
+  useLayoutEffect(() => {
+    promptHistoryRef.current.reset();
+  }, [props.promptHistoryKey]);
   /** Which model-submenu flyout is open: thinking | speed */
   const rootRef = useRef<HTMLDivElement | null>(null);
   /** Main input card only — slash/@ menus overlay this, ignoring project-bar protrusion height. */
@@ -1053,6 +1066,54 @@ export function Composer(props: ComposerProps) {
     return false;
   }
 
+  function handlePromptHistoryKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): boolean {
+    if (
+      (event.key !== "ArrowUp" && event.key !== "ArrowDown") ||
+      event.shiftKey ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.altKey ||
+      props.submitDisabled ||
+      !props.promptHistory?.length
+    )
+      return false;
+    const el = event.currentTarget;
+    if (el.selectionStart !== el.selectionEnd) return false;
+    const direction = event.key === "ArrowUp" ? "previous" : "next";
+    const history = promptHistoryRef.current;
+    // Unchanged recalled entries can be browsed repeatedly, as in a shell.
+    // Once edited, normal multiline movement and the two-step boundary apply.
+    if (!history.isUneditedEntry(props.prompt)) {
+      if (!isTextareaBoundaryLine(el, direction)) return false;
+      const boundary = direction === "previous" ? 0 : el.value.length;
+      if (el.selectionStart !== boundary) {
+        event.preventDefault();
+        el.setSelectionRange(boundary, boundary);
+        el.scrollTop = direction === "previous" ? 0 : el.scrollHeight;
+        setCaret(boundary);
+        syncPromptHighlightScroll(el);
+        return true;
+      }
+    }
+    const draft = history.navigate(
+      direction,
+      { text: props.prompt, refs: refTokens },
+      props.promptHistory,
+    );
+    event.preventDefault();
+    if (draft) {
+      setSuggestionsDismissed(true);
+      setRefTokens(draft.refs);
+      // flushSync also handles adjacent identical prompts: there may be no value change.
+      flushSync(() => props.onPromptChange(draft.text));
+      el.setSelectionRange(draft.text.length, draft.text.length);
+      el.scrollTop = el.scrollHeight;
+      setCaret(draft.text.length);
+      syncPromptHighlightScroll(el);
+    }
+    return true;
+  }
+
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (isImeCompositionEvent(event.nativeEvent)) return;
 
@@ -1104,6 +1165,7 @@ export function Composer(props: ComposerProps) {
         return;
       }
     }
+    if (handlePromptHistoryKeyDown(event)) return;
     if (handleChipKeyDown(event)) return;
     if (!panel && event.key === "Tab" && !event.shiftKey && !event.metaKey && !event.ctrlKey) {
       // Bare path Tab completion when no slash/@ panel is open.
@@ -1116,6 +1178,9 @@ export function Composer(props: ComposerProps) {
         void completePathWithTab(event.currentTarget);
         return;
       }
+    }
+    if (event.key === "Enter" && !event.shiftKey && !props.submitDisabled) {
+      promptHistoryRef.current.reset();
     }
     props.onKeyDown(event);
   }
@@ -1367,6 +1432,7 @@ export function Composer(props: ComposerProps) {
             event.preventDefault();
             return;
           }
+          promptHistoryRef.current.reset();
           if (refTokens.length > 0) {
             const text = serializeComposerRefs(refTokens, props.prompt);
             setRefTokens([]);

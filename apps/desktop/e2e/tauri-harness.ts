@@ -48,7 +48,11 @@ export async function launchTauriHarness(
         native.nativeTheme.themeSource = params.source;
         return null;
       case "shell.open-path":
+      case "shell.open-text":
+      case "shell.open-editor":
         return native.shell.openPath(params.path);
+      case "paths.was-dropped":
+        return false;
       case "shell.open-external":
         return native.shell.openExternal(params.url);
       case "shell.reveal":

@@ -1,5 +1,12 @@
 {
   "nodeMajor": 24,
   "python": "3.12.13",
-  "pythonReleaseTag": "20260807"
+  "pythonReleaseTag": "20260807",
+  "pythonSha256": {
+    "darwin-arm64": "25baa97c65b3f0aa90e21131b4f9e80aef8899e8144006db8a9d2c1ab9e807e3",
+    "darwin-x64": "127053f1736f721e391ddb46f07585d05756e15bb8d757d3bbc0519738998ba1",
+    "linux-arm64": "11e713ae1f969385907a76533cc554f6b2e3f1a84896009f91c3fc871034a170",
+    "linux-x64": "506191be3ee7bd190a8834dcdc1b3bc70aab50608deccc711935aa007239cabd",
+    "win32-x64": "18bcc65b17921806b72cdc88bcf000bf67a2c99a8fc381fe1629f2b9ba56858d"
+  }
 }

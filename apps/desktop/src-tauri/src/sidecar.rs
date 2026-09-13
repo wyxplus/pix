@@ -55,20 +55,12 @@ impl Sidecar {
             // Prepared from this build's Node executable, never a bare `node` lookup.
             PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                 .join("binaries")
-                .join(if cfg!(windows) {
-                    "node.exe"
-                } else {
-                    "node"
-                })
+                .join(if cfg!(windows) { "node.exe" } else { "node" })
         } else {
             std::env::current_exe()?
                 .parent()
                 .ok_or("No executable directory")?
-                .join(if cfg!(windows) {
-                    "node.exe"
-                } else {
-                    "node"
-                })
+                .join(if cfg!(windows) { "node.exe" } else { "node" })
         };
         let data = match std::env::var_os("PIX_DATA_DIR") {
             Some(path) => PathBuf::from(path),

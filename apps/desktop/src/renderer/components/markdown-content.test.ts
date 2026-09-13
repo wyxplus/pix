@@ -15,6 +15,13 @@ function render(markdown: string, workspacePath?: string): string {
 }
 
 describe("MarkdownContent", () => {
+  it("renders remote images as explicit links without loading tracking resources", () => {
+    const html = render("![External diagram](https://example.invalid/pixel.png)");
+    expect(html).toContain('href="https://example.invalid/pixel.png"');
+    expect(html).toContain("External diagram");
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain('rel="preload"');
+  });
   it("renders math, highlighted code, diffs, tables, and Mermaid placeholders", () => {
     expect(render("$E = mc^2$")).toContain("katex");
     expect(render("```javascript\nconst answer = 42\n```")).toContain("content-code-block");

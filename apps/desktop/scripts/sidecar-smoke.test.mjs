@@ -1,7 +1,9 @@
+import { execFileSync } from "node:child_process";
+import { tmpdir } from "node:os";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { join, resolve } from "node:path";
-import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { prepareLaunchEnv } from "./launch-env.mjs";
 import { SidecarClient } from "./sidecar-client.mjs";
 
@@ -35,11 +37,21 @@ export default function (pi: any) {
 `,
     );
     const nativeCalls = [];
+    let pickerPaths = [];
+    const outside = mkdtempSync(join(tmpdir(), "pix-ipc-security-"));
+    const outsideImage = join(outside, "private.png");
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+      "base64",
+    );
+    writeFileSync(outsideImage, png);
     const client = new SidecarClient(
       process.env.PIX_SMOKE_ROOT || resolve(import.meta.dirname, ".."),
       { ...prepared.environment, PIX_NO_AUTO_RESUME: "1" },
       async (method, params) => {
         nativeCalls.push({ method, params });
+        if (method === "dialog.open") return { canceled: false, filePaths: pickerPaths };
+        if (method === "paths.was-dropped") return false;
         return null;
       },
     );
@@ -59,6 +71,49 @@ export default function (pi: any) {
         cwd: prepared.environment.PIX_WORKSPACE,
       });
       assert.ok(snapshot.runtimeId);
+      // A fresh session need not have been flushed to disk yet.
+      if (snapshot.sessionFile) await client.invoke("pix:session:switch", snapshot.sessionFile);
+      await assert.rejects(
+        client.invoke("pix:workspace:save-clipboard-image", {
+          ext: "../../../escape",
+          bytes: [65],
+        }),
+        /extension/,
+      );
+      const pasted = await client.invoke("pix:workspace:save-clipboard-image", {
+        ext: "png",
+        bytes: [...png],
+      });
+      assert.ok(
+        (await client.invoke("pix:workspace:read-attachment-preview", pasted)).startsWith(
+          "data:image/png;base64,",
+        ),
+      );
+      await assert.rejects(
+        client.invoke("pix:workspace:read-attachment-preview", outsideImage),
+        /not authorized/,
+      );
+      await assert.rejects(client.invoke("pix:workspace:open-path", outside), /not authorized/);
+      await assert.rejects(client.invoke("pix:workspace:git-status", outside), /not authorized/);
+      await assert.rejects(
+        client.invoke("pix:agent:prompt", "Image", undefined, [outsideImage]),
+        /not authorized/,
+      );
+      const executable = join(prepared.environment.PIX_WORKSPACE, "evil.exe");
+      writeFileSync(executable, "MZ");
+      await assert.rejects(client.invoke("pix:workspace:open-file", executable), /Executable/);
+      assert.ok(
+        !nativeCalls.some(
+          (call) => call.method === "shell.open-path" && call.params.path === executable,
+        ),
+      );
+      pickerPaths = [outsideImage];
+      await client.invoke("pix:workspace:pick-attachments", { mode: "files" });
+      assert.ok(
+        (await client.invoke("pix:workspace:read-attachment-preview", outsideImage)).startsWith(
+          "data:image/png;base64,",
+        ),
+      );
       await client.invoke("pix:trust:set", true);
       await client.invoke("pix:runtime:reload");
       const extensionNode = JSON.parse(readFileSync(extensionProof, "utf8"));
@@ -119,6 +174,51 @@ export default function (pi: any) {
       assert.ok(
         await client.invoke("pix:workspace:get-git-context", prepared.environment.PIX_WORKSPACE),
       );
+      const repo = join(prepared.environment.PIX_WORKSPACE, "security-git");
+      mkdirSync(repo);
+      const git = (...args) =>
+        execFileSync("git", ["-c", "core.hooksPath=/dev/null", ...args], {
+          cwd: repo,
+          stdio: "pipe",
+          env: {
+            ...process.env,
+            GIT_CONFIG_GLOBAL: "/dev/null",
+            GIT_CONFIG_NOSYSTEM: "1",
+            GIT_AUTHOR_NAME: "Test",
+            GIT_AUTHOR_EMAIL: "test@example.invalid",
+            GIT_COMMITTER_NAME: "Test",
+            GIT_COMMITTER_EMAIL: "test@example.invalid",
+          },
+        });
+      git("init", "-b", "main");
+      writeFileSync(join(repo, "file"), "first");
+      git("add", ".");
+      git("commit", "-m", "first");
+      const linked = join(repo, "linked");
+      await assert.rejects(
+        client.invoke("pix:workspace:create-git-worktree", {
+          cwd: repo,
+          path: linked,
+          newBranch: "trial",
+          branch: "-f",
+        }),
+        /Invalid start ref/,
+      );
+      const worktree = await client.invoke("pix:workspace:create-git-worktree", {
+        cwd: repo,
+        path: linked,
+        newBranch: "trial",
+        branch: "HEAD",
+      });
+      assert.equal(realpathSync(worktree.path), realpathSync(linked));
+      assert.equal(git("branch", "--list", "pix/trial").toString().trim(), "+ pix/trial");
+      const exportedPath = join(prepared.environment.PIX_WORKSPACE, "export.jsonl");
+      await client.invoke("pix:session:export", "jsonl", exportedPath);
+      await assert.rejects(
+        client.invoke("pix:session:export", "jsonl", join(outside, "export.jsonl")),
+        /not authorized/,
+      );
+      await client.invoke("pix:session:import", exportedPath);
       await client.invoke("pix:agent:abort");
       await client.invoke("pix:test:crash-host").catch(() => {});
       const recovered = await client.invoke("pix:host:start", {
@@ -130,6 +230,7 @@ export default function (pi: any) {
     } finally {
       await client.close();
       await prepared.cleanup();
+      rmSync(outside, { recursive: true, force: true });
     }
   },
 );

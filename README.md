@@ -110,7 +110,7 @@ Configure these repository secrets to enable automatic updates:
 
 The workflow embeds the public key and repository-specific endpoint, generates signed updater artifacts, and combines all platforms into `latest.json`. Incomplete key pairs or partial signed releases fail the release job. Without keys, manual installers are produced and update checking stays disabled. Tauri updater signatures are separate from OS code signing.
 
-For local signed packaging, set `PIX_UPDATER_PUBLIC_KEY`, optionally `PIX_UPDATER_ENDPOINT`, and `TAURI_SIGNING_PRIVATE_KEY`, then enable `bundle.createUpdaterArtifacts` in the Tauri build configuration. Never commit private signing keys.
+For local signed packaging, set both `PIX_UPDATER_PUBLIC_KEY` and an HTTPS `PIX_UPDATER_ENDPOINT`, and `TAURI_SIGNING_PRIVATE_KEY`, then enable `bundle.createUpdaterArtifacts` in the Tauri build configuration. Never commit private signing keys.
 
 CI runs checks, business tests, builds, Rust checks, sidecar integration, browser regression and release-script tests. A manually requested release is published only after validation and all platform builds succeed.
 

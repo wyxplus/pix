@@ -1,6 +1,6 @@
 import { test as base, expect, type Browser, type Page } from "@playwright/test";
 import { launchTauriHarness } from "./tauri-harness.ts";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -296,4 +296,25 @@ export async function sendPrompt(page: Page, text: string): Promise<void> {
   await page.getByTestId("prompt-input").fill(text);
   await page.getByTestId("send-prompt").click();
   await waitSettled(page);
+}
+
+/** Exercise native user selection before opening a workspace outside the launch grant. */
+export async function selectWorkspace(
+  pix: LaunchedPix,
+  page: Page,
+  folder: string,
+): Promise<string> {
+  const path = await realpath(folder);
+  await pix.app.evaluate(({ dialog }, selected) => {
+    const previous = dialog.showOpenDialog;
+    Object.defineProperty(dialog, "showOpenDialog", {
+      configurable: true,
+      value: async () => {
+        Object.defineProperty(dialog, "showOpenDialog", { configurable: true, value: previous });
+        return { canceled: false, filePaths: [selected] };
+      },
+    });
+  }, path);
+  expect(await page.evaluate(() => window.pix.workspace.pickFolder())).toBe(path);
+  return path;
 }

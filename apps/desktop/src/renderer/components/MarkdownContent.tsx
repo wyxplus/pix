@@ -397,6 +397,13 @@ export function ContentImage(props: {
     }
   }
 
+  if (/^https?:/i.test(fallback)) {
+    return (
+      <MarkdownLink href={fallback} locale={props.locale}>
+        {props.alt || (props.locale === "zh" ? "查看远程图片" : "Open remote image")}
+      </MarkdownLink>
+    );
+  }
   if (!fallback && !source) return null;
   if (kind === "video") {
     return (

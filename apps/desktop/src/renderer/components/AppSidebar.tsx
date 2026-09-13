@@ -108,6 +108,7 @@ export interface AppSidebarProps {
   onToggleCollapse: () => void;
   onResizeWidth: (px: number) => void;
   onNewThread: () => void;
+  onNewConversation: () => void;
   onSelectProject: (path: string | undefined) => void;
   onOpenProjects: () => void;
   onOpenPackages: () => void;
@@ -481,15 +482,14 @@ function ProductRail(
         </span>
       </div>
 
-      {/* Primary action — pure conversation (protrusion shows 选择项目). Project-bound new
-          sessions only come from each project row action. */}
+      {/* Primary action inherits the active conversation's project. */}
       <nav className="sidebar-primary-nav" aria-label="Primary">
         <button
           type="button"
           data-testid="start-host"
           title={tr("nav.newThread")}
           className="nav-item nav-item-primary"
-          data-target="conversation"
+          data-target={props.workspacePath ? "project" : "conversation"}
           onClick={() => props.onNewThread()}
         >
           <SquarePen className="size-4 shrink-0 opacity-85" strokeWidth={1.6} />
@@ -532,6 +532,7 @@ function ProductRail(
         recentWorkspaces={props.recentWorkspaces}
         threads={props.threads}
         threadsByCwd={props.threadsByCwd}
+        activeSession={props.snapshot}
         threadTitle={props.threadTitle}
         runState={props.runState}
         running={props.running}
@@ -541,7 +542,7 @@ function ProductRail(
         onSelectProject={props.onSelectProject}
         onNewThread={(path) => {
           if (path) props.onNewThreadForProject(path);
-          else props.onNewThread();
+          else props.onNewConversation();
         }}
         onSwitchThread={props.onSwitchThread}
         onRemoveRecent={props.onRemoveRecent}

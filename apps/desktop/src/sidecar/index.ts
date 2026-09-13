@@ -37,6 +37,25 @@ import {
   isHostEvent,
 } from "@pix/contracts";
 import { app, dialog, shell } from "./native.ts";
+import {
+  attachments,
+  authorizeFile,
+  authorizeWorkspace,
+  exportAccess,
+  pendingSessionCwds,
+  preparePromptImages,
+  rememberSession,
+  sessionAccess,
+  workspaceAccess,
+} from "./path-security.ts";
+import {
+  launchDetached,
+  macTerminalScript,
+  windowsEditorExecutable,
+} from "../main/external-launch.ts";
+import { switchGitBranch, validateBranch } from "../main/git-branches.ts";
+import { openWorkspaceFile, validateOpenFile, PASSIVE_FILE_EXTENSIONS } from "../main/open-file.ts";
+import { authorizeSession, sessionWorkspace } from "../main/session-access.ts";
 import { nativeImage, type NativeImage } from "./image.ts";
 import { rpc, renderer, nativeRequest, markReady, type RendererConnection } from "./transport.ts";
 import { setGlobalDispatcher, EnvHttpProxyAgent } from "undici";
@@ -54,7 +73,7 @@ import {
   unlinkSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
@@ -469,8 +488,8 @@ async function searchWorkspacePaths(
 
 function resolveWorkspaceCwd(cwd: string | undefined, fallback?: string): string {
   const path = (typeof cwd === "string" && cwd.trim() ? cwd : fallback)?.trim();
-  if (!path || !existsSync(path)) throw new Error("工作区路径无效");
-  return path;
+  if (!path) throw new Error("工作区路径无效");
+  return workspaceAccess.directory(path);
 }
 
 async function listGitBranches(cwd: string): Promise<GitBranchInfo[]> {
@@ -515,23 +534,7 @@ async function listGitBranches(cwd: string): Promise<GitBranchInfo[]> {
 }
 
 async function checkoutGitBranch(cwd: string, branch: string): Promise<GitContextInfo> {
-  const name = branch.trim();
-  if (!name) throw new Error("分支名不能为空");
-  // Remote-tracking: origin/foo → create/switch local foo tracking it when needed.
-  if (name.includes("/") && !existsSync(join(cwd, ".git"))) {
-    // still fine — git handles it
-  }
-  try {
-    await runGit(cwd, ["checkout", name]);
-  } catch (error) {
-    // origin/feature → checkout -b feature --track origin/feature
-    if (name.includes("/")) {
-      const short = name.replace(/^[^/]+\//, "");
-      await runGit(cwd, ["checkout", "-B", short, "--track", name]);
-    } else {
-      throw error;
-    }
-  }
+  await switchGitBranch(runGit, cwd, branch);
   return readGitContext(cwd);
 }
 
@@ -541,9 +544,9 @@ async function createGitBranch(
   checkout = true,
 ): Promise<GitContextInfo> {
   const name = applyBranchPrefix(branch);
-  if (!name) throw new Error("分支名不能为空");
-  if (checkout) await runGit(cwd, ["checkout", "-b", name]);
-  else await runGit(cwd, ["branch", name]);
+  await validateBranch(runGit, cwd, name);
+  if (checkout) await runGit(cwd, ["switch", "--create", name]);
+  else await runGit(cwd, ["branch", "--", name]);
   return readGitContext(cwd);
 }
 
@@ -579,6 +582,7 @@ async function listGitWorktrees(cwd: string): Promise<GitWorktreeInfo[]> {
     }
   }
   flush();
+  for (const item of items) if (existsSync(item.path)) workspaceAccess.grant(item.path);
   return items;
 }
 
@@ -618,6 +622,7 @@ async function listAllManagedWorktrees(): Promise<GitWorktreeInfo[]> {
     if (!isLinkedWorktreeDirectory(dir)) return;
     const key = normalizeRecentPathKey(dir);
     if (byKey.has(key)) return;
+    workspaceAccess.grant(dir);
     const ctx = readGitContext(dir);
     byKey.set(key, {
       path: dir,
@@ -774,7 +779,7 @@ function setWorktreePrefs(patch: {
   const prefs = loadDesktopPrefs();
   if (patch.rootConfigured !== undefined) {
     const v = patch.rootConfigured.trim();
-    if (v) prefs.worktreeRoot = v;
+    if (v) prefs.worktreeRoot = workspaceAccess.directory(v);
     else delete prefs.worktreeRoot;
   }
   if (patch.autoDelete !== undefined) prefs.worktreeAutoDelete = patch.autoDelete;
@@ -881,6 +886,8 @@ async function createGitWorktree(
     target = uniqueWorktreePath(root, folderStem);
   }
   if (!target) throw new Error("工作树路径不能为空");
+  if (options.path) target = workspaceAccess.assert(target, cwd, true);
+  target = resolve(target);
   mkdirSync(dirname(target), { recursive: true });
   const args = ["worktree", "add"];
   const startPoint = options.branch?.trim();
@@ -888,11 +895,21 @@ async function createGitWorktree(
   const explicitStart = startPoint && startPoint.toUpperCase() !== "HEAD" ? startPoint : undefined;
   // Always create a new branch for the worktree (folder stem / auto project-N).
   const newBranchName = (options.newBranch?.trim() || options.name?.trim() || autoName).trim();
-  args.push("-b", applyBranchPrefix(newBranchName), target);
-  if (explicitStart) args.push(explicitStart);
+  const branchName = applyBranchPrefix(newBranchName);
+  await validateBranch(runGit, cwd, branchName);
+  let startCommit: string | undefined;
+  if (explicitStart) {
+    if (explicitStart.startsWith("-")) throw new Error("Invalid start ref");
+    startCommit = (
+      await runGit(cwd, ["rev-parse", "--verify", "--end-of-options", `${explicitStart}^{commit}`])
+    ).trim();
+  }
+  args.push("-b", branchName, "--", target);
+  if (startCommit) args.push(startCommit);
   await runGit(cwd, args);
   await pruneManagedWorktrees(cwd, target);
   // Surface in the sidebar project rail immediately (even before openPath).
+  workspaceAccess.grant(target);
   rememberWorkspace(target);
   return { path: target, context: readGitContext(target) };
 }
@@ -902,7 +919,7 @@ async function removeGitWorktree(
   worktreePath: string,
   cwdHint?: string,
 ): Promise<{ removed: string }> {
-  const targetRaw = worktreePath.trim();
+  const targetRaw = workspaceAccess.assert(worktreePath);
   if (!targetRaw) throw new Error("工作树路径不能为空");
   const targetKey = normalizeRecentPathKey(targetRaw);
   if (!isLinkedWorktreeDirectory(targetRaw) && !existsSync(targetRaw)) {
@@ -918,7 +935,7 @@ async function removeGitWorktree(
   }
   // Run remove from the worktree itself or any repo path that shares the gitdir.
   const gitCwd =
-    (cwdHint?.trim() && existsSync(cwdHint) ? cwdHint : undefined) ||
+    (cwdHint?.trim() ? workspaceAccess.directory(cwdHint) : undefined) ||
     ctx.mainWorktreePath ||
     targetRaw;
   await removeWorktreeSafely({
@@ -1651,27 +1668,12 @@ async function openInApp(appId: string, cwd: string): Promise<void> {
     if (found.kind === "terminal") {
       if (found.id === "terminal") {
         // Apple Terminal via AppleScript so cwd is applied.
-        const script = `tell application "Terminal" to do script "cd ${cwd.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+        const script = macTerminalScript("Terminal", cwd);
         await execFileAsync("osascript", ["-e", script], { windowsHide: true });
         return;
       }
       if (found.id === "iterm" || found.id === "iterm2") {
-        const script = `tell application "iTerm"
-  activate
-  try
-    tell current window
-      create tab with default profile
-      tell current session
-        write text "cd ${cwd.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"
-      end tell
-    end tell
-  on error
-    create window with default profile
-    tell current session of current window
-      write text "cd ${cwd.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"
-    end tell
-  end try
-end tell`;
+        const script = macTerminalScript("iTerm", cwd);
         await execFileAsync("osascript", ["-e", script], { windowsHide: true });
         return;
       }
@@ -1684,7 +1686,7 @@ end tell`;
       await openWindowsTerminal(found, cwd);
       return;
     }
-    await execFileAsync(found.target, [cwd], { windowsHide: true, shell: true });
+    await launchDetached(windowsEditorExecutable(found.target), [cwd]);
     return;
   }
   if (found.kind === "terminal") {
@@ -1858,10 +1860,10 @@ function ensureDefaultWorkspacePath(): string {
   const path = join(root, base);
   if (!existsSync(path)) {
     mkdirSync(path, { recursive: true });
-    return path;
+    return workspaceAccess.grant(path);
   }
   try {
-    if (lstatSync(path).isDirectory()) return path;
+    if (lstatSync(path).isDirectory()) return workspaceAccess.grant(path);
   } catch {
     // fall through to a unique suffix
   }
@@ -1869,7 +1871,7 @@ function ensureDefaultWorkspacePath(): string {
   while (existsSync(join(root, `${base}-${n}`))) n += 1;
   const unique = join(root, `${base}-${n}`);
   mkdirSync(unique, { recursive: true });
-  return unique;
+  return workspaceAccess.grant(unique);
 }
 
 /**
@@ -1879,7 +1881,7 @@ function ensureDefaultWorkspacePath(): string {
 function ensureConversationWorkspacePath(): string {
   const path = join(app.getPath("documents"), "Pix", "conversations");
   mkdirSync(path, { recursive: true });
-  return path;
+  return workspaceAccess.grant(path);
 }
 
 function saveDesktopPrefs(prefs: DesktopPrefs): void {
@@ -2125,7 +2127,7 @@ function processEnvironment(): Record<string, string> {
   const global = cachedGlobalSdk ?? { source: "global" as const, available: false };
   const sdkEnv = piSdkSpawnEnv(preference, builtin, global);
   appliedPiSdkSource = sdkEnv.PIX_PI_SDK_SOURCE === "global" ? "global" : "builtin";
-  return { ...withProxy, ...sdkEnv };
+  return { ...withProxy, ...sdkEnv, PIX_ATTACHMENT_DIR: attachments.directory };
 }
 
 /** Live PATH from process.env (may gain npm global bin after pi ensure). */
@@ -2556,7 +2558,17 @@ class HostSupervisor {
     resumeRecent?: boolean;
     force?: boolean;
   }): Promise<HostSnapshot> {
-    return this.#exclusive(() => this.#startExclusive(options));
+    return this.#exclusive(async () => {
+      if (options?.cwd) options.cwd = await authorizeWorkspace(options.cwd);
+      if (options?.sessionFile)
+        options.sessionFile = authorizeSession(
+          options.sessionFile,
+          sessionAccess,
+          workspaceAccess,
+          pendingSessionCwds,
+        );
+      return this.#startExclusive(options);
+    });
   }
 
   async #startExclusive(options?: {
@@ -2621,6 +2633,14 @@ class HostSupervisor {
     options?: { resumeRecent?: boolean; sessionFile?: string },
   ): Promise<HostSnapshot> {
     return this.#exclusive(async () => {
+      cwd = await authorizeWorkspace(cwd);
+      if (options?.sessionFile)
+        options.sessionFile = authorizeSession(
+          options.sessionFile,
+          sessionAccess,
+          workspaceAccess,
+          pendingSessionCwds,
+        );
       rememberWorkspace(cwd);
 
       // Already on this workspace host — no detach/restart.
@@ -2941,6 +2961,7 @@ class HostSupervisor {
       });
       if (event.type !== "session.list")
         throw new Error("Agent Host returned an unexpected session list response");
+      for (const thread of event.threads) rememberSession(thread.path, thread.cwd);
       const result: { threads: SessionThreadSummary[]; activeSessionId?: string } = {
         threads: event.threads,
       };
@@ -2990,7 +3011,11 @@ class HostSupervisor {
     threads: SessionThreadSummary[];
     history: SessionHistoryMessage[];
   }> {
-    return this.#exclusive(() => this.#switchSessionExclusive(sessionPath));
+    return this.#exclusive(() =>
+      this.#switchSessionExclusive(
+        authorizeSession(sessionPath, sessionAccess, workspaceAccess, pendingSessionCwds),
+      ),
+    );
   }
 
   async #switchSessionExclusive(sessionPath: string): Promise<{
@@ -3208,7 +3233,13 @@ class HostSupervisor {
       requestId: randomUUID(),
       format,
     };
-    if (outputPath !== undefined) command.outputPath = outputPath;
+    if (outputPath !== undefined) {
+      try {
+        command.outputPath = workspaceAccess.assert(outputPath, this.#workspaceCwd, true);
+      } catch {
+        command.outputPath = exportAccess.assert(outputPath, this.#workspaceCwd, true);
+      }
+    }
     const event = await this.#request(command);
     if (event.type !== "session.export")
       throw new Error("Agent Host returned an unexpected session.export response");
@@ -3230,13 +3261,31 @@ class HostSupervisor {
     const resolvedInputPath = isAbsolute(inputPath)
       ? inputPath
       : resolve(this.#workspaceCwd ?? process.cwd(), inputPath);
+    let approvedInput: string;
+    try {
+      approvedInput = sessionAccess.assert(resolvedInputPath);
+    } catch {
+      approvedInput = workspaceAccess.assert(resolvedInputPath);
+    }
     const command: HostCommand = {
       protocolVersion: IPC_PROTOCOL_VERSION,
       type: "session.import",
       requestId: randomUUID(),
-      inputPath: resolvedInputPath,
+      inputPath: approvedInput,
     };
-    if (cwdOverride) command.cwdOverride = cwdOverride;
+    if (cwdOverride) command.cwdOverride = await authorizeWorkspace(cwdOverride);
+    else {
+      try {
+        workspaceAccess.directory(sessionWorkspace(command.inputPath));
+      } catch {
+        const selected = await dialog.showOpenDialog(this.window, {
+          title: "Choose a workspace for the imported session",
+          properties: ["openDirectory"],
+        });
+        if (selected.canceled || !selected.filePaths[0]) return undefined;
+        command.cwdOverride = await authorizeWorkspace(selected.filePaths[0]);
+      }
+    }
     let event: HostEvent;
     try {
       event = await this.#request(command);
@@ -3664,7 +3713,7 @@ class HostSupervisor {
     const agentDir = await this.#resolveAgentDir();
     const { ensureModelsJsonTemplate } = await import("@pix/agent-runtime");
     const path = await ensureModelsJsonTemplate(agentDir);
-    const error = await shell.openPath(path);
+    const error = await nativeRequest<string>("shell.open-text", { path });
     if (error) throw new Error(error);
   }
 
@@ -3998,6 +4047,8 @@ class HostSupervisor {
         // Background host: keep snapshot/sequence coherent for promote, resolve pending.
         if (message.type === "host.ready" || message.type === "runtime.snapshot") {
           parked.snapshot = message.snapshot;
+          if (message.snapshot.sessionFile)
+            rememberSession(message.snapshot.sessionFile, message.snapshot.cwd);
           parked.lastSequence = message.snapshot.sequence;
           if (message.snapshot.sessionFile) {
             parked.sessionKey = normalizeSessionKey(message.snapshot.sessionFile);
@@ -4146,6 +4197,7 @@ class HostSupervisor {
 
   #acceptSnapshot(snapshot: HostSnapshot): void {
     this.#snapshot = snapshot;
+    if (snapshot.sessionFile) rememberSession(snapshot.sessionFile, snapshot.cwd);
     this.#lastSequence = snapshot.sequence;
     if (snapshot.sessionFile) this.#sessionFile = snapshot.sessionFile;
   }
@@ -4271,6 +4323,19 @@ function showOsNotification(payload: ShowOsNotificationPayload): Promise<boolean
 void (async () => {
   // Name + About/Dock icon (must be after ready for About panel iconPath on some builds).
   themeLibrary = new ThemeLibrary(app.getPath("userData"));
+  const initialPrefs = loadDesktopPrefs();
+  for (const path of [
+    ...(initialPrefs.recentWorkspaces ?? []),
+    initialPrefs.lastWorkspace,
+    initialPrefs.worktreeRoot,
+    process.env.PIX_WORKSPACE,
+  ]) {
+    if (path && existsSync(path)) workspaceAccess.grant(path);
+  }
+  const sessionRoot =
+    process.env.PI_CODING_AGENT_SESSION_DIR || join(defaultAgentDir(), "sessions");
+  mkdirSync(sessionRoot, { recursive: true });
+  sessionAccess.grant(sessionRoot);
   await applyAppSessionProxy();
   rpc.handle("pix:app:get-runtime", () => ({
     platform: process.platform,
@@ -4462,7 +4527,7 @@ void (async () => {
     if (!entry) throw new Error(`Unknown config id: ${id}`);
     if (!entry.openable) throw new Error("This file cannot be opened from Pix (sensitive).");
     if (!entry.exists) throw new Error(`Config path does not exist: ${entry.path}`);
-    const error = await shell.openPath(entry.path);
+    const error = await nativeRequest<string>("shell.open-text", { path: entry.path });
     if (error) throw new Error(error);
   });
   rpc.handle("pix:pi-sdk:install-global", () => runInstallGlobalPiCli());
@@ -4501,7 +4566,7 @@ void (async () => {
   rpc.handle("pix:workspace:get-git-context", (_event, cwd?: string) => {
     const path =
       typeof cwd === "string" && cwd.trim() ? cwd : (supervisor?.getWorkspaceCwd() ?? undefined);
-    return readGitContext(path);
+    return readGitContext(path ? workspaceAccess.directory(path) : undefined);
   });
   rpc.handle("pix:workspace:list-git-branches", async (_event, cwd?: string) => {
     const path = resolveWorkspaceCwd(cwd, supervisor?.getWorkspaceCwd());
@@ -4548,7 +4613,7 @@ void (async () => {
   rpc.handle("pix:workspace:get-worktree-prefs", (_event, cwd?: string) => {
     const path =
       typeof cwd === "string" && cwd.trim() ? cwd : (supervisor?.getWorkspaceCwd() ?? undefined);
-    return getWorktreePrefsView(path);
+    return getWorktreePrefsView(path ? workspaceAccess.directory(path) : undefined);
   });
   rpc.handle(
     "pix:workspace:set-worktree-prefs",
@@ -4573,13 +4638,37 @@ void (async () => {
     ) => setGitPrefs(patch ?? {}),
   );
   rpc.handle("pix:workspace:reveal-in-folder", (_event, cwd: string) => {
-    if (typeof cwd === "string" && cwd.trim()) return shell.showItemInFolder(cwd);
+    if (typeof cwd === "string" && cwd.trim())
+      return shell.showItemInFolder(workspaceAccess.assert(cwd));
   });
-  rpc.handle("pix:workspace:open-file", async (_event, path: string) => {
-    if (typeof path !== "string" || !path.trim()) throw new Error("Invalid file path");
-    const error = await shell.openPath(path);
-    if (error) throw new Error(error);
-  });
+  rpc.handle(
+    "pix:workspace:open-file",
+    async (_event, path: string, location?: { line?: number; column?: number }) => {
+      const cwd = supervisor?.getWorkspaceCwd();
+      const canonical = await authorizeFile(path, cwd);
+      validateOpenFile(canonical);
+      const targets =
+        PASSIVE_FILE_EXTENSIONS.has(extname(canonical).toLowerCase()) && !location?.line
+          ? []
+          : await listOpenTargets(cwd ?? dirname(canonical));
+      if (process.platform === "darwin") {
+        for (const editor of targets.filter((target) =>
+          ["vscode", "vscode-insiders", "cursor"].includes(target.id),
+        )) {
+          const bundle = resolveMacAppPath(editor.target);
+          const cli =
+            editor.id === "cursor"
+              ? "cursor"
+              : editor.id === "vscode-insiders"
+                ? "code-insiders"
+                : "code";
+          if (bundle) editor.target = join(bundle, "Contents", "Resources", "app", "bin", cli);
+          if (!bundle || !existsSync(editor.target)) targets.splice(targets.indexOf(editor), 1);
+        }
+      }
+      await openWorkspaceFile(canonical, location, targets, nativeRequest);
+    },
+  );
   rpc.handle("pix:workspace:open-external", async (_event, url: string) => {
     if (typeof url !== "string") throw new Error("Invalid external URL");
     const protocol = new URL(url).protocol;
@@ -4662,7 +4751,7 @@ void (async () => {
       const resolved = fromOpts ?? supervisor?.getWorkspaceCwd();
       if (!resolved || !existsSync(resolved)) return [];
       return searchWorkspacePaths(
-        resolved,
+        workspaceAccess.directory(resolved),
         typeof query === "string" ? query : "",
         options?.limit ?? 24,
       );
@@ -4671,22 +4760,12 @@ void (async () => {
   rpc.handle(
     "pix:workspace:save-clipboard-image",
     async (_event, options?: { bytes?: number[]; ext?: string }) => {
-      const dir = join(app.getPath("temp"), "pix-attachments");
-      mkdirSync(dir, { recursive: true });
-      let buffer: Buffer | undefined;
-      let ext = typeof options?.ext === "string" && options.ext.trim() ? options.ext.trim() : "png";
-      if (Array.isArray(options?.bytes) && options.bytes.length > 0) {
-        buffer = Buffer.from(options.bytes);
-      } else {
-        const bytes = await nativeRequest<number[]>("clipboard.read-image");
-        if (!bytes?.length) return undefined;
-        buffer = Buffer.from(bytes);
-        ext = "png";
+      if (options?.bytes !== undefined) {
+        if (!Array.isArray(options.bytes)) throw new Error("Invalid clipboard bytes");
+        return attachments.save(options.bytes, options.ext ?? "png");
       }
-      if (!buffer || buffer.length === 0) return undefined;
-      const filePath = join(dir, `paste-${Date.now()}.${ext.replace(/^\./, "")}`);
-      writeFileSync(filePath, buffer);
-      return filePath;
+      const bytes = await nativeRequest<number[]>("clipboard.read-image");
+      return bytes?.length ? attachments.save(bytes, "png") : undefined;
     },
   );
   /** Local image → data-URL. Default maxEdge 160 (chips); pass a larger edge for timeline display. */
@@ -4694,7 +4773,7 @@ void (async () => {
     "pix:workspace:read-attachment-preview",
     async (_event, filePath?: string, options?: { maxEdge?: number }) => {
       if (typeof filePath !== "string" || !filePath.trim()) return undefined;
-      const abs = isAbsolute(filePath) ? resolve(filePath) : resolve(filePath);
+      const abs = await authorizeFile(filePath, supervisor?.getWorkspaceCwd());
       if (!existsSync(abs)) return undefined;
       try {
         if (!lstatSync(abs).isFile()) return undefined;
@@ -4820,7 +4899,8 @@ void (async () => {
         piTuiGuard.release();
       }
       piTuiGuard.assertHostPromptAllowed();
-      return supervisor?.prompt(message, streamingBehavior, imagePaths);
+      const images = await preparePromptImages(imagePaths, supervisor?.getWorkspaceCwd());
+      return supervisor?.prompt(message, streamingBehavior, images);
     },
   );
 
@@ -4828,7 +4908,19 @@ void (async () => {
   rpc.handle("pix:side-chats:load", () => sideChatLibrary.load());
   rpc.handle("pix:side-chats:save", (_event, archive: unknown) => sideChatLibrary.save(archive));
 
-  rpc.handle("pix:agent:side-chat", (_event, request: SideChatRequest) => {
+  rpc.handle("pix:agent:side-chat", async (_event, request: SideChatRequest) => {
+    request = {
+      ...request,
+      messages: await Promise.all(
+        request.messages.map(async (message) => {
+          const images = await preparePromptImages(
+            message.imagePaths,
+            supervisor?.getWorkspaceCwd(),
+          );
+          return { ...message, ...(images ? { imagePaths: images } : {}) };
+        }),
+      ),
+    };
     if (!supervisor) throw new Error("Agent Host is not ready");
     return supervisor.sideChat(request);
   });
@@ -4844,6 +4936,13 @@ void (async () => {
       if (!options || typeof options.sessionFile !== "string" || typeof options.cwd !== "string") {
         throw new Error("terminal.open requires sessionFile and cwd");
       }
+      options.cwd = await authorizeWorkspace(options.cwd);
+      options.sessionFile = authorizeSession(
+        options.sessionFile,
+        sessionAccess,
+        workspaceAccess,
+        pendingSessionCwds,
+      );
       const plan = planPiTuiLaunch({
         sessionFile: options.sessionFile,
         cwd: options.cwd,
@@ -4955,7 +5054,9 @@ void (async () => {
     }
     // Import agent-runtime (pi stays external in the main bundle — see vite.main.config).
     const { listProjectSessions } = await import("@pix/agent-runtime");
-    return listProjectSessions(cwd);
+    const threads = await listProjectSessions(workspaceAccess.directory(cwd));
+    for (const thread of threads) if (existsSync(thread.path)) sessionAccess.grant(thread.path);
+    return threads;
   });
   rpc.handle("pix:session:new", () => supervisor?.newSession());
   rpc.handle("pix:session:create-blank", () => supervisor?.createBlankConversation());
@@ -5035,6 +5136,7 @@ void (async () => {
     piTuiController?.disposeAll();
     piTuiGuard.release();
     await supervisor?.stop();
+    attachments.dispose();
   });
   if (process.env.PIX_NO_AUTO_RESUME !== "1" && supervisor) {
     // Product cold start: restore last durable workspace and continue recent pi session.

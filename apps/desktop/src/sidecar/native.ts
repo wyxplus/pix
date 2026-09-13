@@ -2,6 +2,7 @@ import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { readFileSync, mkdirSync } from "node:fs";
 import { nativeRequest } from "./transport.ts";
+import { exportAccess, grantSelected } from "./path-security.ts";
 
 const appRoot = process.env.PIX_APP_ROOT || resolve(import.meta.dirname, "../..");
 export const app = {
@@ -25,14 +26,28 @@ type DialogOptions = {
   filters?: { name: string; extensions: string[] }[];
 };
 export const dialog = {
-  showOpenDialog: (
+  showOpenDialog: async (
     _owner: unknown,
     options: DialogOptions,
-  ): Promise<{ canceled: boolean; filePaths: string[] }> => nativeRequest("dialog.open", options),
-  showSaveDialog: (
+  ): Promise<{ canceled: boolean; filePaths: string[] }> => {
+    const result = await nativeRequest<{ canceled: boolean; filePaths: string[] }>(
+      "dialog.open",
+      options,
+    );
+    if (!result.canceled) result.filePaths.forEach(grantSelected);
+    return result;
+  },
+  showSaveDialog: async (
     _owner: unknown,
     options: DialogOptions,
-  ): Promise<{ canceled: boolean; filePath?: string }> => nativeRequest("dialog.save", options),
+  ): Promise<{ canceled: boolean; filePath?: string }> => {
+    const result = await nativeRequest<{ canceled: boolean; filePath?: string }>(
+      "dialog.save",
+      options,
+    );
+    if (!result.canceled && result.filePath) exportAccess.grantOutput(result.filePath);
+    return result;
+  },
 };
 export const shell = {
   openExternal: (url: string): Promise<void> => nativeRequest("shell.open-external", { url }),

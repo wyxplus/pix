@@ -17,6 +17,7 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
@@ -36,7 +37,7 @@ const VERSIONS_PATH = join(RUNTIMES_ROOT, "versions.json");
 const CACHE_ROOT = join(homedir(), ".cache", "pix-runtimes");
 
 /**
- * @typedef {{ node: string, python: string, pythonReleaseTag: string }} RuntimeVersions
+ * @typedef {{ node: string, python: string, pythonReleaseTag: string, pythonSha256: Record<string, string> }} RuntimeVersions
  */
 
 function parseArgs(argv) {
@@ -68,6 +69,7 @@ export function loadVersions(versionsPath = VERSIONS_PATH) {
     node: requireNode24(),
     python: String(raw.python),
     pythonReleaseTag: String(raw.pythonReleaseTag),
+    pythonSha256: raw.pythonSha256 ?? {},
   };
 }
 
@@ -472,6 +474,12 @@ function dirSizeBytes(path) {
 /**
  * @param {string} file
  */
+export function verifyArchiveSha256(file, expected) {
+  if (!/^[a-f0-9]{64}$/.test(expected ?? "") || sha256File(file) !== expected) {
+    throw new Error(`Runtime archive checksum mismatch: ${file}`);
+  }
+}
+
 function sha256File(file) {
   const h = createHash("sha256");
   h.update(readFileSync(file));
@@ -492,31 +500,8 @@ async function fetchOne(target, versions, force) {
   const npmRoot = resolveBuildNpmRoot();
   const npmVersion = JSON.parse(readFileSync(join(npmRoot, "package.json"), "utf8")).version;
 
-  if (
-    !force &&
-    existsSync(manifestPath) &&
-    existsSync(join(nodeDest, "node_modules/npm/bin/npm-cli.js")) &&
-    findPythonBinary(pythonDest)
-  ) {
-    try {
-      const prev = JSON.parse(readFileSync(manifestPath, "utf8"));
-      if (
-        prev.node === versions.node &&
-        prev.python === versions.python &&
-        prev.pruned === true &&
-        prev.layoutVersion === 3 &&
-        prev.nodeRuntime === "shared" &&
-        prev.npm === npmVersion &&
-        prev.pythonReleaseTag === versions.pythonReleaseTag
-      ) {
-        console.log(`[fetch-runtimes] ${target.key} already at pinned versions (pruned)`);
-        return { platformDir, nodeDest, pythonDest, manifestPath };
-      }
-    } catch {
-      // re-fetch
-    }
-  }
-
+  // Always stage from the verified archive; an older staged manifest is not proof of integrity.
+  void force;
   mkdirSync(CACHE_ROOT, { recursive: true });
   mkdirSync(platformDir, { recursive: true });
 
@@ -526,8 +511,12 @@ async function fetchOne(target, versions, force) {
   // ── Python ────────────────────────────────────────────────────────────
   const pyMeta = pythonDistMeta(target, versions);
   const pyArchive = join(CACHE_ROOT, pyMeta.archiveName);
+  const expected = versions.pythonSha256[target.key];
+  if (!/^[a-f0-9]{64}$/.test(expected ?? ""))
+    throw new Error(`Missing pinned Python checksum for ${target.key}`);
   await download(pyMeta.url, pyArchive);
-  const pyExtract = join(tmpdir(), `pix-py-${target.key}-${Date.now()}`);
+  verifyArchiveSha256(pyArchive, expected);
+  const pyExtract = mkdtempSync(join(tmpdir(), `pix-py-${target.key}-`));
   try {
     extractArchive(pyArchive, pyExtract, pyMeta.kind);
     materializePython(pyExtract, pythonDest);

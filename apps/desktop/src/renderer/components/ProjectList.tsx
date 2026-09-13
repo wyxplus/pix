@@ -6,7 +6,8 @@
  * A thread whose cwd is a known project (pinned / recent / current) is a **session**
  * and appears only under that project. Everything else is a **conversation**.
  */
-import type { SessionThreadSummary } from "@pix/contracts";
+import type { HostSnapshot, SessionThreadSummary } from "@pix/contracts";
+import { threadMatchesSession } from "../lib/active-session.ts";
 import {
   Archive,
   ChevronRight,
@@ -128,6 +129,7 @@ export interface ProjectListProps {
   recentWorkspaces: string[];
   threads: SessionThreadSummary[];
   threadsByCwd: Record<string, SessionThreadSummary[]>;
+  activeSession?: Pick<HostSnapshot, "sessionId" | "sessionFile"> | undefined;
   threadTitle: string;
   runState: ThreadRunState;
   running: boolean;
@@ -804,6 +806,7 @@ export function ProjectList(props: ProjectListProps) {
     if (!hasThreadMessages(thread)) return null;
     if (isDeletedThread(thread.id, deletedThreads)) return null;
     if (isArchivedThread(thread.id, archivedThreads)) return null;
+    thread = { ...thread, active: threadMatchesSession(thread, props.activeSession) };
     const kind = opts?.kind ?? "session";
     // The active runtime session is not the selected rail item while a project row is selected.
     const selected = thread.active && !props.selectedProjectPath;

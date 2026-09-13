@@ -27,6 +27,8 @@ import { ArrowDown } from "lucide-react";
 import { AppSidebar } from "./components/AppSidebar.tsx";
 import { CommandPalette } from "./components/CommandPalette.tsx";
 import { Composer } from "./components/Composer.tsx";
+import { threadMatchesSession } from "./lib/active-session.ts";
+import { compactUserMessageText } from "./lib/composer-highlight.ts";
 import { ConfirmDialog } from "./components/ConfirmDialog.tsx";
 import { ErrorDialog } from "./components/ErrorDialog.tsx";
 import { unwrapRemoteIpcError } from "../shared/ipc-error.ts";
@@ -713,8 +715,15 @@ function App() {
     return items.map((item) => ({ ...item, id: `${sessionKey}:${item.id}` }));
   }, [history, liveStream, sessionKey, snapshot?.hideThinkingBlock]);
   const hasActivity = timeline.length > 0;
+  const promptHistory = useMemo(
+    () =>
+      timeline.flatMap((item) =>
+        item.kind === "user" && item.text.trim() ? [compactUserMessageText(item.text)] : [],
+      ),
+    [timeline],
+  );
   const waitingForInput = runState === "waiting" || foregroundMarkerState === "waiting";
-  const activeThread = threads.find((thread) => thread.active);
+  const activeThread = threads.find((thread) => threadMatchesSession(thread, snapshot));
   const threadTitle =
     activeThread?.title ||
     (sentPrompts[0]
@@ -2523,6 +2532,16 @@ function App() {
     }
   }
 
+  /** Primary action and shortcuts inherit the active conversation's project. */
+  async function newTask() {
+    const project = pendingPureConversationRef.current
+      ? undefined
+      : (asProjectPath(selectedWorkspacePathRef.current) ??
+        asProjectPath(useShellStore.getState().snapshot?.cwd));
+    if (project) await newThreadForProject(project);
+    else await newBlankTask();
+  }
+
   /** Monotonic id so rapid「新建会话」clicks only apply the latest result. */
   const newBlankTaskGenRef = useRef(0);
   const newBlankTaskInFlightRef = useRef(false);
@@ -3186,7 +3205,7 @@ function App() {
     () =>
       buildShellCommands(
         {
-          newThread: () => void newBlankTask(),
+          newThread: () => void newTask(),
           openPackages: () => void openPackages(),
           openResources: () => void openResources(),
           openSettings: () => void openSettings(),
@@ -3230,7 +3249,7 @@ function App() {
           setPaletteOpen(!useShellStore.getState().paletteOpen);
           break;
         case "new-thread":
-          void newBlankTask();
+          void newTask();
           break;
         case "packages":
           void openPackages();
@@ -3366,7 +3385,8 @@ function App() {
         onToggleTheme={() => toggleColorMode()}
         onToggleCollapse={sidebar.toggle}
         onResizeWidth={(px) => setSidebarWidthPx(px)}
-        onNewThread={() => navigateFromSidebar(newBlankTask)}
+        onNewThread={() => navigateFromSidebar(newTask)}
+        onNewConversation={() => navigateFromSidebar(newBlankTask)}
         onSelectProject={(path) => navigateFromSidebar(() => selectProjectPath(path))}
         onOpenProjects={() => navigateFromSidebar(openProjects)}
         onOpenPackages={() => navigateFromSidebar(openPackages)}
@@ -3598,6 +3618,8 @@ function App() {
                           <Composer
                             locale={locale}
                             prompt={prompt}
+                            promptHistory={promptHistory}
+                            promptHistoryKey={sessionKey}
                             onPromptChange={setPrompt}
                             onSubmit={(event) => void sendPrompt(event)}
                             onAbort={() => void abort()}

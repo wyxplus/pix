@@ -1,5 +1,12 @@
 import { resolve } from "node:path";
-import { test, expect, startHost, conversationSessionButtons, sendPrompt } from "./fixtures.ts";
+import {
+  test,
+  expect,
+  selectWorkspace,
+  startHost,
+  conversationSessionButtons,
+  sendPrompt,
+} from "./fixtures.ts";
 
 test.describe("Desktop shell + Node Sidecar E2E", () => {
   test("conversation content renders safe interactive rich content", async ({ page, pix }) => {
@@ -356,12 +363,13 @@ test.describe("Desktop shell + Node Sidecar E2E", () => {
     }
   });
 
-  test("top and conversations New session start pure conversation with project pick", async ({
+  test("without an active project, top and conversations New session offer project pick", async ({
     page,
+    pix,
   }) => {
     await startHost(page);
 
-    // Top「新建会话」is always pure conversation (not bound to selected project).
+    // Without an active project, top「新建会话」starts a pure conversation.
     await expect(page.getByTestId("start-host")).toHaveAttribute("data-target", "conversation");
     await page.getByTestId("start-host").click({ force: true });
     await expect(page.getByTestId("composer-project-picker")).toBeVisible({ timeout: 30_000 });
@@ -372,8 +380,8 @@ test.describe("Desktop shell + Node Sidecar E2E", () => {
     await expect(page.getByTestId("composer-project-picker")).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId("workspace-name-chip")).toContainText(/Select project|选择项目/i);
 
-    // Project-bound new session remains on each project row action.
-    const projectPath = resolve(import.meta.dirname, "..");
+    // Opening a project makes it the default target for the next new session.
+    const projectPath = await selectWorkspace(pix, page, resolve(import.meta.dirname, ".."));
     await page.evaluate(async (path) => {
       await window.pix.workspace.openPath(path, { resumeRecent: false });
     }, projectPath);
@@ -786,7 +794,7 @@ test.describe("Desktop shell + Node Sidecar E2E", () => {
       .toBeGreaterThanOrEqual(Math.max(before, 2));
   });
 
-  test("m2: model/thinking chips, openPath/resume workspace", async ({ page }) => {
+  test("m2: model/thinking chips, openPath/resume workspace", async ({ page, pix }) => {
     const { mkdir } = await import("node:fs/promises");
     const { dirname, join } = await import("node:path");
 
@@ -840,8 +848,9 @@ test.describe("Desktop shell + Node Sidecar E2E", () => {
 
     // Cross-cwd open must not keep the previous workspace sessionFile.
     // Avoid path segments filtered by isEphemeralWorkspacePath (e.g. "other-workspace").
-    const otherCwd = join(dirname(cwd!), "project-b");
+    let otherCwd = join(dirname(cwd!), "project-b");
     await mkdir(otherCwd, { recursive: true });
+    otherCwd = await selectWorkspace(pix, page, otherCwd);
     const openResult = await page.evaluate(async (path) => {
       try {
         const snap = await window.pix.workspace.openPath(path, { resumeRecent: false });
@@ -864,7 +873,7 @@ test.describe("Desktop shell + Node Sidecar E2E", () => {
     });
   });
 
-  test("m2: ephemeral openPath does not pollute recent workspaces UI", async ({ page }) => {
+  test("m2: ephemeral openPath does not pollute recent workspaces UI", async ({ page, pix }) => {
     const { mkdir } = await import("node:fs/promises");
     const { dirname, join } = await import("node:path");
 
@@ -875,6 +884,7 @@ test.describe("Desktop shell + Node Sidecar E2E", () => {
 
     const other = join(dirname(cwd!), "recent-ws-b");
     await mkdir(other, { recursive: true });
+    await selectWorkspace(pix, page, other);
     await page.evaluate(async (path) => {
       await window.pix.workspace.openPath(path, { resumeRecent: false });
     }, other);

@@ -17,6 +17,7 @@ import type {
   ThemeLibrarySnapshot,
 } from "@pix/contracts";
 import { create } from "zustand";
+import { markActiveSession } from "../lib/active-session.ts";
 import { DEFAULT_LOCALE, isLocale, type Locale } from "../lib/i18n.ts";
 import { SHELL_SIDEBAR } from "../lib/layout.ts";
 import { SIDEBAR_DEFAULT_TRANSLUCENT, clampSidebarWidth } from "../lib/sidebar-prefs.ts";
@@ -523,7 +524,8 @@ export const useShellStore = create<ShellState>((set, get) => ({
     });
   },
   setHistory: (history) => set({ history }),
-  setThreads: (threads) => set({ threads }),
+  setThreads: (threads) =>
+    set((state) => ({ threads: markActiveSession(threads, state.snapshot) })),
   setPrompt: (prompt) => set({ prompt }),
   setSentPrompts: (prompts) =>
     set((state) => ({
@@ -807,6 +809,7 @@ export const useShellStore = create<ShellState>((set, get) => ({
       const key = sessionKeyFromSnapshot(snapshot);
       return {
         snapshot,
+        threads: markActiveSession(state.threads, snapshot),
         queuedMessages: snapshot.queuedMessages,
         runtimeId: snapshot.runtimeId,
         lastSequence: snapshot.sequence,
@@ -875,13 +878,10 @@ export const useShellStore = create<ShellState>((set, get) => ({
         snapshot: input.snapshot,
         runtimeId: input.snapshot.runtimeId,
         lastSequence: input.snapshot.sequence,
-        threads:
-          input.threads.length > 0
-            ? input.threads
-            : state.threads.map((t) => ({
-                ...t,
-                active: t.path === input.snapshot.sessionFile || t.id === input.snapshot.sessionId,
-              })),
+        threads: markActiveSession(
+          input.threads.length > 0 ? input.threads : state.threads,
+          input.snapshot,
+        ),
         history: input.history,
         events: [],
         liveStream,

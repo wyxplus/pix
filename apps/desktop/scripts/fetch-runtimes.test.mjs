@@ -8,6 +8,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   loadVersions,
+  verifyArchiveSha256,
   packShippingArchives,
   prunePythonRuntime,
   pythonDistMeta,
@@ -197,5 +198,38 @@ function assertEqual(actual, expected, message) {
 void pathToFileURL;
 // Confirm versions.json is real JSON on disk
 JSON.parse(readFileSync(VERSIONS_PATH, "utf8"));
+
+// A checksum mismatch must fail before the archive can reach extraction or execution.
+{
+  const { createHash } = await import("node:crypto");
+  const root = mkdtempSync(join(tmpdir(), "pix-checksum-test-"));
+  try {
+    const archive = join(root, "python.tar.gz");
+    writeFileSync(archive, "trusted release fixture");
+    const expected = createHash("sha256").update(readFileSync(archive)).digest("hex");
+    verifyArchiveSha256(archive, expected);
+    writeFileSync(archive, "tampered cached asset");
+    let rejected = false;
+    try {
+      verifyArchiveSha256(archive, expected);
+    } catch {
+      rejected = true;
+    }
+    assert(rejected, "rejects tampered archive");
+    rejected = false;
+    try {
+      verifyArchiveSha256(archive, undefined);
+    } catch {
+      rejected = true;
+    }
+    assert(rejected, "rejects missing checksum");
+    const versions = loadVersions(VERSIONS_PATH);
+    for (const key of ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"]) {
+      assert(/^[a-f0-9]{64}$/.test(versions.pythonSha256[key]), `pinned checksum for ${key}`);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
 
 console.log("fetch-runtimes.test.mjs: ok");

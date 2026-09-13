@@ -1,3 +1,6 @@
+import { loadPromptImages, promptImageRoots } from "./prompt-images.ts";
+export { loadPromptImages, promptImageRoots } from "./prompt-images.ts";
+import { isPlainSettingObject, mergeSettingValue } from "./settings-merge.ts";
 import {
   type AgentSessionRuntime,
   type AgentSessionServices,
@@ -43,9 +46,9 @@ import type {
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, extname, isAbsolute, join, win32 } from "node:path";
+import { basename, isAbsolute, join, win32 } from "node:path";
 import {
   createPortableExtensionUiBridge,
   type ExtensionUiRequestEvent,
@@ -136,25 +139,6 @@ const MACOS_GITHUB_CLI_PATHS = ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"] as 
 
 /** Per-runtime OpenAI service_tier preference (not a pi session field). */
 const serviceTierByRuntime = new WeakMap<object, ServiceTier>();
-
-export async function loadPromptImages(paths: string[]) {
-  const types: Record<string, string> = {
-    ".gif": "image/gif",
-    ".jpeg": "image/jpeg",
-    ".jpg": "image/jpeg",
-    ".png": "image/png",
-    ".webp": "image/webp",
-  };
-  return Promise.all(
-    paths.map(async (path) => {
-      const mimeType = types[extname(path).toLowerCase()];
-      if (!mimeType) throw new Error(`Unsupported prompt image type: ${path}`);
-      const bytes = await readFile(path);
-      if (!bytes.length) throw new Error(`Prompt image is empty: ${path}`);
-      return { type: "image" as const, data: bytes.toString("base64"), mimeType };
-    }),
-  );
-}
 
 function getRuntimeServiceTier(runtime: object): ServiceTier {
   return serviceTierByRuntime.get(runtime) ?? "default";
@@ -2274,7 +2258,10 @@ export async function createPixRuntime(
                   timestamp: Date.now(),
                   content: [
                     { type: "text" as const, text: message.text },
-                    ...(await loadPromptImages(message.imagePaths ?? [])),
+                    ...(await loadPromptImages(
+                      message.imagePaths ?? [],
+                      promptImageRoots(runtime.cwd),
+                    )),
                   ],
                 }
               : {
@@ -2299,7 +2286,10 @@ export async function createPixRuntime(
         for (const message of history) side.runtime.session.sessionManager.appendMessage(message);
         side.runtime.session.agent.state.messages = history;
         const question = request.messages.at(-1)!;
-        const images = await loadPromptImages(question.imagePaths ?? []);
+        const images = await loadPromptImages(
+          question.imagePaths ?? [],
+          promptImageRoots(runtime.cwd),
+        );
         completion.signal.throwIfAborted();
         await side.runtime.session.prompt(question.text, { images });
         completion.signal.throwIfAborted();
@@ -2573,21 +2563,6 @@ const WRITABLE_PI_SETTING_KEYS = new Set([
   "httpIdleTimeoutMs",
   "enabledModels",
 ]);
-
-function isPlainSettingObject(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function mergeSettingValue(globalValue: unknown, projectValue: unknown): unknown {
-  if (!isPlainSettingObject(globalValue) || !isPlainSettingObject(projectValue)) {
-    return projectValue;
-  }
-  const merged: Record<string, unknown> = { ...globalValue };
-  for (const [key, value] of Object.entries(projectValue)) {
-    merged[key] = mergeSettingValue(globalValue[key], value);
-  }
-  return merged;
-}
 
 function formatSettingValue(key: string, value: unknown): string {
   if (value === undefined) return "pi default";

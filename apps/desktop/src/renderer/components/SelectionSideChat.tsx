@@ -54,6 +54,13 @@ export function SelectionSideChat(props: {
     [chat.messages],
   );
   const pending = chat.status === "streaming";
+  const promptHistory = useMemo(
+    () =>
+      chat.messages.flatMap((message) =>
+        message.role === "user" && message.text.trim() ? [message.text] : [],
+      ),
+    [chat.messages],
+  );
   const tr = (key: Parameters<typeof t>[1]) => t(props.locale, key);
   const model = chat.settings.model;
   const modelOption = props.modelOptions.find(
@@ -290,6 +297,8 @@ export function SelectionSideChat(props: {
               surface="side"
               locale={props.locale}
               prompt={chat.draft}
+              promptHistory={promptHistory}
+              promptHistoryKey={chat.id}
               composerRef={inputRef}
               running={pending}
               onPromptChange={(text) => store().setDraft(chat.id, text)}

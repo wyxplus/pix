@@ -11,7 +11,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Page } from "@playwright/test";
-import { expect, startHost, test } from "./fixtures.ts";
+import { expect, selectWorkspace, startHost, test } from "./fixtures.ts";
 
 type DefaultTrust = "ask" | "always" | "never";
 
@@ -101,7 +101,11 @@ test.describe("Project trust (view mode)", () => {
     await startHost(page);
     await setDefaultProjectTrust(page, "always");
 
-    const gated = await createGatedProject(pix.root, "trust-always-gated");
+    const gated = await selectWorkspace(
+      pix,
+      page,
+      await createGatedProject(pix.root, "trust-always-gated"),
+    );
     const opened = await openProject(page, gated);
 
     expect(opened.cwd.replace(/\\/g, "/")).toBe(gated.replace(/\\/g, "/"));
@@ -118,7 +122,11 @@ test.describe("Project trust (view mode)", () => {
     await startHost(page);
     await setDefaultProjectTrust(page, "never");
 
-    const gated = await createGatedProject(pix.root, "trust-never-gated");
+    const gated = await selectWorkspace(
+      pix,
+      page,
+      await createGatedProject(pix.root, "trust-never-gated"),
+    );
     const opened = await openProject(page, gated);
 
     expect(opened.trustRequired).toBe(true);
@@ -154,7 +162,11 @@ test.describe("Project trust (view mode)", () => {
     await startHost(page);
     await setDefaultProjectTrust(page, "ask");
 
-    const gated = await createGatedProject(pix.root, "trust-ask-gated");
+    const gated = await selectWorkspace(
+      pix,
+      page,
+      await createGatedProject(pix.root, "trust-ask-gated"),
+    );
     const opened = await openProject(page, gated);
 
     expect(opened.trustRequired).toBe(true);
@@ -189,7 +201,11 @@ test.describe("Project trust (view mode)", () => {
     await startHost(page);
     await setDefaultProjectTrust(page, "ask");
 
-    const gatedLater = await createGatedProject(pix.root, "trust-ask-later");
+    const gatedLater = await selectWorkspace(
+      pix,
+      page,
+      await createGatedProject(pix.root, "trust-ask-later"),
+    );
     await openProject(page, gatedLater);
     await expect(page.getByTestId("project-trust-dialog")).toBeVisible({ timeout: 15_000 });
     await page.getByTestId("project-trust-dialog-later").click();
@@ -200,7 +216,11 @@ test.describe("Project trust (view mode)", () => {
 
     // never → no dialog for a different gated project
     await setDefaultProjectTrust(page, "never");
-    const gatedNever = await createGatedProject(pix.root, "trust-never-no-dialog");
+    const gatedNever = await selectWorkspace(
+      pix,
+      page,
+      await createGatedProject(pix.root, "trust-never-no-dialog"),
+    );
     await openProject(page, gatedNever);
     await expect
       .poll(async () => (await hostSnapshotTrust(page)).projectTrusted, { timeout: 15_000 })
@@ -216,7 +236,11 @@ test.describe("Project trust (view mode)", () => {
     await startHost(page);
     await setDefaultProjectTrust(page, "never");
 
-    const gated = await createGatedProject(pix.root, "trust-toggle-gated");
+    const gated = await selectWorkspace(
+      pix,
+      page,
+      await createGatedProject(pix.root, "trust-toggle-gated"),
+    );
     await openProject(page, gated);
     await expect(page.getByTestId("trust-chip")).toContainText(/untrusted|未信任/i, {
       timeout: 15_000,
