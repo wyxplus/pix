@@ -2,6 +2,7 @@ import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { builtinModules } from "node:module";
 import { resolve } from "node:path";
 import { defineConfig, type Plugin } from "vite-plus";
+import { copyAgentResources } from "./vite.agent-resources.ts";
 
 const external = [
   "@earendil-works/pi-coding-agent",
@@ -27,7 +28,7 @@ function copyPiSdkHook(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [copyPiSdkHook()],
+  plugins: [copyPiSdkHook(), copyAgentResources()],
   build: {
     target: "node24",
     outDir: resolve(import.meta.dirname, "dist/agent-host"),

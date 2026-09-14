@@ -42,6 +42,12 @@ mkdirSync(staged, { recursive: true });
 if (release) {
   if (!existsSync(join(root, "dist/sidecar/sidecar.mjs")))
     throw new Error("Run pnpm build:desktop before staging a release");
+  const agentInstructions = readFileSync(join(root, "dist/resources/AGENTS.md"), "utf8");
+  if (
+    agentInstructions !==
+    readFileSync(join(root, "../../packages/agent-runtime/resources/AGENTS.md"), "utf8")
+  )
+    throw new Error("Bundled AGENTS.md is stale; run pnpm build:desktop before staging a release");
   rmSync(staged, { recursive: true, force: true });
   const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
   // This dependency-only package has no workspace links. Use pnpm's locked deploy
@@ -77,6 +83,7 @@ if (release) {
   verifyRealFiles(join(staged, "node_modules"));
   cpSync(join(root, "dist/sidecar"), join(staged, "dist/sidecar"), { recursive: true });
   cpSync(join(root, "dist/agent-host"), join(staged, "dist/agent-host"), { recursive: true });
+  cpSync(join(root, "dist/resources"), join(staged, "dist/resources"), { recursive: true });
   const stagedPackage = JSON.parse(readFileSync(join(staged, "package.json"), "utf8"));
   stagedPackage.version = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
   writeFileSync(join(staged, "package.json"), `${JSON.stringify(stagedPackage, null, 2)}\n`);

@@ -1,6 +1,7 @@
 import { builtinModules } from "node:module";
 import { resolve } from "node:path";
 import { defineConfig } from "vite-plus";
+import { copyAgentResources } from "./vite.agent-resources.ts";
 
 const nodeBuiltins = [...builtinModules, ...builtinModules.map((name) => `node:${name}`)];
 
@@ -22,6 +23,7 @@ function isExternal(id: string): boolean {
 }
 
 export default defineConfig({
+  plugins: [copyAgentResources()],
   build: {
     target: "node24",
     outDir: resolve(import.meta.dirname, "dist/sidecar"),
