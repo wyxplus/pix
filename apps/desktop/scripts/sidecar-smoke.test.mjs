@@ -23,6 +23,16 @@ await test(
   "Node Sidecar: SDK, stream, sessions, settings, Git, abort, crash recovery and shutdown",
   { timeout: 120_000 },
   async () => {
+    const sidecarRoot = process.env.PIX_SMOKE_ROOT || resolve(import.meta.dirname, "..");
+    const bundledInstructions = readFileSync(join(sidecarRoot, "dist/resources/AGENTS.md"), "utf8");
+    assert.equal(
+      bundledInstructions,
+      readFileSync(
+        new URL("../../../packages/agent-runtime/resources/AGENTS.md", import.meta.url),
+        "utf8",
+      ),
+      "The built or staged sidecar must ship the version-controlled AGENTS.md unchanged",
+    );
     const prepared = await prepareLaunchEnv({ isolated: true });
     const extensionDir = join(prepared.environment.PI_CODING_AGENT_DIR, "extensions");
     const extensionProof = join(prepared.environment.PIX_WORKSPACE, "extension-node.json");
@@ -32,7 +42,7 @@ await test(
       `
 import { writeFileSync } from "node:fs";
 export default function (pi: any) {
-  pi.on("session_start", () => writeFileSync(${JSON.stringify(extensionProof)}, JSON.stringify({ node: process.execPath, version: process.version })));
+  pi.on("session_start", (_event, ctx) => writeFileSync(${JSON.stringify(extensionProof)}, JSON.stringify({ node: process.execPath, version: process.version, systemPrompt: ctx.getSystemPrompt() })));
 }
 `,
     );
@@ -46,7 +56,7 @@ export default function (pi: any) {
     );
     writeFileSync(outsideImage, png);
     const client = new SidecarClient(
-      process.env.PIX_SMOKE_ROOT || resolve(import.meta.dirname, ".."),
+      sidecarRoot,
       { ...prepared.environment, PIX_NO_AUTO_RESUME: "1" },
       async (method, params) => {
         nativeCalls.push({ method, params });
@@ -117,6 +127,11 @@ export default function (pi: any) {
       await client.invoke("pix:trust:set", true);
       await client.invoke("pix:runtime:reload");
       const extensionNode = JSON.parse(readFileSync(extensionProof, "utf8"));
+      assert.equal(
+        extensionNode.systemPrompt.split(bundledInstructions.trim()).length,
+        2,
+        "The agent host must load the bundled instructions exactly once",
+      );
       assert.match(extensionNode.version, /^v24\./);
       assert.equal(
         realpathSync(extensionNode.node),

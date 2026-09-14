@@ -115,7 +115,16 @@ function previewFromEntry(entry: TreeEntryLike, roleKind: SessionTreeNodeView["r
   // Keep enough text for hover tooltips; UI truncates with CSS ellipsis.
   const max = 4000;
   if (typeof entry.summary === "string" && entry.summary.trim()) {
-    return entry.summary
+    // pi adds this English preamble after generation. The UI already labels the row as
+    // a branch summary; show the generated body while keeping persisted SDK data intact.
+    const summary =
+      roleKind === "branch_summary"
+        ? entry.summary.replace(
+            /^The user explored a different conversation branch before returning here\.\r?\nSummary of that exploration:\r?\n\r?\n/,
+            "",
+          )
+        : entry.summary;
+    return summary
       .replace(/[\n\t]+/g, " ")
       .trim()
       .slice(0, max);

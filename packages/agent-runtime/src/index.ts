@@ -2,6 +2,13 @@ import { loadPromptImages, promptImageRoots } from "./prompt-images.ts";
 export { loadPromptImages, promptImageRoots } from "./prompt-images.ts";
 import { isPlainSettingObject, mergeSettingValue } from "./settings-merge.ts";
 import {
+  CONTENT_LANGUAGE_INSTRUCTIONS,
+  appendLanguageReference,
+  installContentLanguageStreamHook,
+  sessionLanguageReference,
+} from "./content-language.ts";
+export { CONTENT_LANGUAGE_INSTRUCTIONS } from "./content-language.ts";
+import {
   type AgentSessionRuntime,
   type AgentSessionServices,
   type CreateAgentSessionFromServicesOptions,
@@ -1580,14 +1587,11 @@ export async function createPixRuntime(
       settingsManager,
       resourceLoaderOptions: {
         additionalExtensionPaths: temporaryExtensionPaths,
-        ...(options.appendSystemPrompt
-          ? {
-              appendSystemPromptOverride: (base: string[]) => [
-                ...base,
-                options.appendSystemPrompt!,
-              ],
-            }
-          : {}),
+        appendSystemPromptOverride: (base: string[]) => [
+          ...base,
+          ...(options.appendSystemPrompt ? [options.appendSystemPrompt] : []),
+          CONTENT_LANGUAGE_INSTRUCTIONS,
+        ],
       },
     });
     // Keep only the latest service-layer config diagnostics for this session instance.
@@ -1665,6 +1669,7 @@ export async function createPixRuntime(
   });
 
   await bindExtensionUi();
+  installContentLanguageStreamHook(runtime.session);
   // Official catalog thinkingLevelMap for custom models that only set reasoning:true.
   await ensureSessionModelThinkingMap(runtime.session, runtime.services);
   const serviceTierCatalogPeers = () => catalogModelPeers(runtime.services);
@@ -1679,6 +1684,7 @@ export async function createPixRuntime(
     extensionUi.reload();
     const result = await operation();
     await bindExtensionUi();
+    installContentLanguageStreamHook(runtime.session);
     await ensureSessionModelThinkingMap(runtime.session, runtime.services);
     // New Agent instance after switch/fork/new — bind after extensions so this stays outermost.
     installServiceTierPayloadHook(
@@ -1696,6 +1702,7 @@ export async function createPixRuntime(
         extensionUi.reload();
       },
     });
+    installContentLanguageStreamHook(runtime.session);
     await ensureSessionModelThinkingMap(runtime.session, runtime.services);
     installServiceTierPayloadHook(
       runtime.session.agent,
@@ -1832,6 +1839,7 @@ export async function createPixRuntime(
           extensionUi.reload();
         },
       });
+      installContentLanguageStreamHook(runtime.session);
       return createSnapshot(
         runtimeId,
         runtime,
@@ -2320,9 +2328,11 @@ export async function createPixRuntime(
       }
       if (!model) throw new Error("没有可用模型，请先在设置中配置模型");
       const context: Parameters<typeof modelRuntime.completeSimple>[1] = {
-        systemPrompt:
+        systemPrompt: appendLanguageReference(
           options?.systemPrompt ??
-          "You are a helpful assistant. Reply with only the requested text.",
+            "You are a helpful assistant. Reply with only the requested text.",
+          sessionLanguageReference(runtime.session, options?.messages),
+        ),
         messages: options?.messages?.map((message) =>
           message.role === "user"
             ? { role: "user" as const, content: message.text, timestamp: Date.now() }
