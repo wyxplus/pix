@@ -2836,7 +2836,7 @@ dependencies = [
 
 [[package]]
 name = "pix-desktop"
-version = "0.7.9"
+version = "0.7.10"
 dependencies = [
  "dunce",
  "image",
