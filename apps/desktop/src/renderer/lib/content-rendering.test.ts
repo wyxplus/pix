@@ -28,6 +28,12 @@ describe("conversation content targets", () => {
       path: "/work/project/src/app.ts",
       line: 12,
     });
+    expect(parseContentLink("app.ts:12:3", "/work/project")).toEqual({
+      kind: "file",
+      path: "/work/project/app.ts",
+      line: 12,
+      column: 3,
+    });
     expect(parseContentLink("https://example.com/docs")).toEqual({
       kind: "external",
       href: "https://example.com/docs",
@@ -37,6 +43,29 @@ describe("conversation content targets", () => {
 
   it("converts local media paths to encoded file URLs", () => {
     expect(contentSourceUrl("/tmp/design preview.png")).toBe("file:///tmp/design%20preview.png");
+  });
+
+  it("preserves Windows drives, UNC hosts and Unicode file names", () => {
+    expect(parseContentLink("C:\\Users\\Alice\\报告 folder\\app.ts:20:3")).toEqual({
+      kind: "file",
+      path: "C:\\Users\\Alice\\报告 folder\\app.ts",
+      line: 20,
+      column: 3,
+    });
+    expect(parseContentLink("output/report.xlsx", "C:\\work")).toEqual({
+      kind: "file",
+      path: "C:\\work\\output\\report.xlsx",
+    });
+    expect(parseContentLink("file://server/share/%E6%8A%A5%E5%91%8A%20v2.xlsx")).toEqual({
+      kind: "file",
+      path: "//server/share/报告 v2.xlsx",
+    });
+    expect(parseContentLink("file:///C:/work/app.ts#L20C3")).toEqual({
+      kind: "file",
+      path: "C:/work/app.ts",
+      line: 20,
+      column: 3,
+    });
   });
 
   it("shortens absolute paths under the workspace for session display", () => {

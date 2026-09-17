@@ -24,6 +24,9 @@ function installBrowserPixStub(): void {
     openFile: async (path: string) => {
       console.info("[session-content-demo] openFile", path);
     },
+    revealInFolder: async (path: string) => {
+      console.info("[session-content-demo] revealInFolder", path);
+    },
     openExternal: async (url: string) => {
       window.open(url, "_blank", "noopener,noreferrer");
     },

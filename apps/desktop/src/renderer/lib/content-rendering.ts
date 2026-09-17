@@ -84,11 +84,23 @@ export function parseContentLink(href: string, workspacePath?: string): ContentL
   if (/^(javascript:|data:|vbscript:)/i.test(value)) return { kind: "blocked" };
 
   let decoded = safeDecode(value);
+  if (/^(javascript:|data:|vbscript:)/i.test(decoded)) return { kind: "blocked" };
+  // A Windows drive is a path, not a custom URL protocol. Reject other schemes
+  // before resolving a relative path (including encoded javascript:/data: URLs).
+  const schemeCandidate = parseFileLocation(decoded).path;
+  if (
+    /^[a-z][a-z\d+.-]*:/i.test(schemeCandidate) &&
+    !/^(?:file:|[a-z]:[\\/])/i.test(schemeCandidate)
+  ) {
+    return { kind: "blocked" };
+  }
   if (/^file:/i.test(decoded)) {
     try {
       const fileUrl = new URL(decoded);
       decoded = safeDecode(fileUrl.pathname);
-      if (/^\/[a-zA-Z]:\//.test(decoded)) decoded = decoded.slice(1);
+      if (fileUrl.hostname && fileUrl.hostname !== "localhost") {
+        decoded = `//${fileUrl.hostname}${decoded}`;
+      } else if (/^\/[a-zA-Z]:\//.test(decoded)) decoded = decoded.slice(1);
       if (fileUrl.hash) decoded += fileUrl.hash;
     } catch {
       return { kind: "blocked" };
@@ -101,6 +113,27 @@ export function parseContentLink(href: string, workspacePath?: string): ContentL
     location.path = resolveRelativePath(workspacePath, location.path);
   }
   return { kind: "file", ...location };
+}
+
+type MarkdownNode = { type: string; url?: string; children?: MarkdownNode[] };
+
+/** Canonicalize Windows links before rehype-sanitize interprets the drive as a URL scheme. */
+export function remarkLocalFileLinks() {
+  return function transform(node: MarkdownNode): void {
+    if ((node.type === "link" || node.type === "definition" || node.type === "image") && node.url) {
+      if (/^(?:[a-z]:[\\/]|\\\\)/i.test(node.url)) {
+        const location = parseFileLocation(node.url);
+        node.url = contentSourceUrl(location.path);
+        if (location.line) {
+          node.url += `#L${location.line}${location.column ? `C${location.column}` : ""}`;
+        }
+      } else if (/^[^:/\\]+\.[^:/\\]+:\d+(?::\d+)?$/.test(node.url)) {
+        // A bare source filename with :line is also mistaken for a URL scheme.
+        node.url = `./${node.url}`;
+      }
+    }
+    node.children?.forEach(transform);
+  };
 }
 
 function encodeFilePath(path: string): string {

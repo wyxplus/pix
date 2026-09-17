@@ -40,6 +40,7 @@ import { app, dialog, shell } from "./native.ts";
 import {
   attachments,
   authorizeFile,
+  authorizeReveal,
   authorizeWorkspace,
   exportAccess,
   pendingSessionCwds,
@@ -4637,9 +4638,10 @@ void (async () => {
       },
     ) => setGitPrefs(patch ?? {}),
   );
-  rpc.handle("pix:workspace:reveal-in-folder", (_event, cwd: string) => {
-    if (typeof cwd === "string" && cwd.trim())
-      return shell.showItemInFolder(workspaceAccess.assert(cwd));
+  rpc.handle("pix:workspace:reveal-in-folder", async (_event, path: string) => {
+    if (typeof path !== "string" || !path.trim()) throw new Error("Invalid file path");
+    const canonical = await authorizeReveal(path, supervisor?.getWorkspaceCwd());
+    await shell.showItemInFolder(canonical);
   });
   rpc.handle(
     "pix:workspace:open-file",

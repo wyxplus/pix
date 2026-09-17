@@ -180,6 +180,29 @@ describe("external launches", () => {
       "specific line",
     );
   });
+
+  it("opens generated documents in their associated application even when an editor exists", async () => {
+    const targets = [{ id: "vscode", name: "VS Code", kind: "ide" as const, target: "code" }];
+    for (const ext of ["docx", "xlsx", "pptx", "odt", "ods", "odp", "rtf", "csv", "tsv", "pdf"]) {
+      const path = join(root, `报告 v2.${ext}`);
+      writeFileSync(path, "document");
+      const native = vi.fn(async () => undefined);
+      await openWorkspaceFile(path, undefined, targets, native);
+      expect(native).toHaveBeenCalledExactlyOnceWith("shell.open-path", { path });
+    }
+    const path = join(root, "data.csv");
+    writeFileSync(path, "a,b");
+    const native = vi.fn(async () => undefined);
+    await openWorkspaceFile(path, { line: 2 }, targets, native);
+    expect(native).toHaveBeenCalledWith("shell.open-editor", {
+      path,
+      executable: "code",
+      args: ["--goto", `${path}:2:1`],
+    });
+    await expect(
+      openWorkspaceFile(join(root, "missing.pdf"), undefined, [], native),
+    ).rejects.toThrow();
+  });
 });
 
 describe("branch switching with a real repository", () => {

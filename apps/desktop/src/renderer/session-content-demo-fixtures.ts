@@ -78,6 +78,8 @@ export function richAssistantMarkdown(_workspace = DEMO_WORKSPACE): string {
     // Relative paths + #L/#C — same shape as product agent replies / e2e rich fixture
     // (workspacePath resolves them; labels render as workspace-relative source chips).
     "[fixture.txt](fixture.txt#L1C1)",
+    "[季度报告.docx](<output/季度报告 2026 v2.docx>) · [数据.xlsx](output/data.xlsx)",
+    "[Windows report](<C:/Users/Alice/Documents/季度报告/报告 2026 v2.xlsx>)",
     "[External docs](https://example.com/docs)",
     "",
     "![Preview image](photo.png)",

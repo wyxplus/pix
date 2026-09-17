@@ -389,7 +389,15 @@ async function handleCommand(command: HostCommand): Promise<void> {
         unsubscribe?.();
         unsubscribe = undefined;
         await handle?.dispose();
-        const options: CreatePixRuntimeOptions = { cwd: command.cwd };
+        const options: CreatePixRuntimeOptions = {
+          cwd: command.cwd,
+          appendSystemPrompt: [
+            "Pix desktop renders local Markdown file links with Open file and Show in folder actions.",
+            "After successfully creating a local file, include a Markdown link to that file in the final answer: [filename](<absolute path>). Only link files actually created or verified to exist.",
+            "Use forward slashes in Windows links, e.g. [report.xlsx](<C:/Users/name/project/report.xlsx>). For source locations, append :line or :line:column to the path. Do not wrap file links in backticks.",
+            "Prefer saving generated files in the current workspace unless the user requests another destination. Local image previews can use ![description](<absolute path>).",
+          ].join("\n"),
+        };
         if (command.agentDir) options.agentDir = command.agentDir;
         if (command.model) options.model = command.model;
         if (command.tools) options.tools = command.tools;

@@ -55,6 +55,15 @@ export async function authorizeFile(path: string, cwd?: string): Promise<string>
   }
 }
 
+/** Preserve project-root reveal actions and also accept individually selected files. */
+export async function authorizeReveal(path: string, cwd?: string): Promise<string> {
+  try {
+    return workspaceAccess.assert(path, cwd);
+  } catch {
+    return authorizeFile(path, cwd);
+  }
+}
+
 export async function preparePromptImages(
   paths: string[] | undefined,
   cwd?: string,

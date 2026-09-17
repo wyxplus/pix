@@ -660,6 +660,11 @@ function App() {
   const workspacePath =
     asProjectPath(selectedWorkspacePath) ??
     (pendingPureConversation ? undefined : asProjectPath(snapshot?.cwd));
+  // Conversation directories stay hidden in project chrome, but file references
+  // still need the actual session cwd to resolve relative paths.
+  const contentWorkspacePath = pendingPureConversation
+    ? undefined
+    : (snapshot?.cwd ?? workspacePath);
   const workspace = workspaceLabel(workspacePath);
   /** Host running under conversation home (not a user project), or about to. */
   const isPureConversation =
@@ -3529,7 +3534,7 @@ function App() {
                     waiting={waitingForInput}
                     locale={locale}
                     sessionKey={sessionKey}
-                    {...(workspacePath ? { workspacePath } : {})}
+                    {...(contentWorkspacePath ? { workspacePath: contentWorkspacePath } : {})}
                     ready={timelineReady}
                     editingLocked={running}
                     endRef={timelineEndRef}

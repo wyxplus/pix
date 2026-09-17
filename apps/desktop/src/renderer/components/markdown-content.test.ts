@@ -143,7 +143,8 @@ describe("MarkdownContent", () => {
     const linkedGif = render("[播放 v10 动态 GIF](output/v10.gif)", "/work/project");
     expect(linkedGif).toContain("content-image-button");
     expect(linkedGif).toContain("file:///work/project/output/v10.gif");
-    expect(linkedGif).not.toContain("content-file-link");
+    expect(linkedGif).toContain("content-file-link");
+    expect(linkedGif).toContain('title="/work/project/output/v10.gif"');
   });
 
   it("renders GFM footnotes as a Sources section with citation chips", () => {
@@ -172,6 +173,34 @@ describe("MarkdownContent", () => {
     expect(html).toContain('title="/work/project/src/app.ts:12:3"');
     // Basename / path-like labels collapse to workspace-relative form (session UI).
     expect(html).toContain("src/app.ts");
+  });
+
+  it("keeps Windows drive and file URL links clickable through sanitization", () => {
+    for (const href of [
+      "C:/Users/Alice/报告 folder/report.xlsx",
+      "file:///C:/Users/Alice/报告%20folder/report.xlsx",
+    ]) {
+      const html = render(`[报告](<${href}> "short title")`);
+      expect(html).toContain("content-file-link");
+      expect(html).toContain('title="C:/Users/Alice/报告 folder/report.xlsx"');
+      expect(html).toContain('aria-label="File actions: 报告"');
+      expect(html).not.toContain('title="short title"');
+    }
+    const source = render("[source][ref]\n\n[ref]: <C:/work/app.ts:12:3>");
+    expect(source).toContain('title="C:/work/app.ts:12:3"');
+    expect(render("[app.ts](app.ts:12:3)", "/work")).toContain('title="/work/app.ts:12:3"');
+    const windowsImage = render("![photo](<C:/Users/Alice/报告 folder/photo.png>)");
+    expect(windowsImage).toContain("content-image-button");
+    expect(windowsImage).toContain('title="C:/Users/Alice/报告 folder/photo.png"');
+    expect(render("[shared](file://server/share/report.docx)")).toContain(
+      'title="//server/share/report.docx"',
+    );
+  });
+
+  it("does not turn unknown or encoded executable protocols into file actions", () => {
+    for (const href of ["javascript%3Aalert(1)", "data%3Atext/html,evil", "custom:command"]) {
+      expect(render(`[unsafe](${href})`, "/work/project")).not.toContain("content-file-link");
+    }
   });
 
   it("renders markdown reference-style links", () => {

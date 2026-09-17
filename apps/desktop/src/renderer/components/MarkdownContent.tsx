@@ -1,6 +1,6 @@
 /** Streaming-safe rich content renderer for assistant messages. */
 import { memo, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
-import { BookMarked, Check, Copy, ExternalLink, FileCode2, Maximize2 } from "lucide-react";
+import { BookMarked, Check, Copy, ExternalLink, Maximize2 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
 import rehypeSanitize from "rehype-sanitize";
@@ -10,6 +10,7 @@ import "katex/dist/katex.min.css";
 import { Button } from "@/components/ui/button";
 import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
 import { ContentCodeBlock } from "./ContentCodeBlock.tsx";
+import { LocalFileLink } from "./LocalFileLink.tsx";
 import { ContentPreviewDialog, ImagePreviewDialog } from "./ContentPreviewDialog.tsx";
 import {
   contentMediaKind,
@@ -17,6 +18,7 @@ import {
   formatFileLinkLabel,
   isInlineImagePath,
   parseContentLink,
+  remarkLocalFileLinks,
 } from "../lib/content-rendering.ts";
 import { markdownSanitizeSchema } from "../lib/markdown-sanitize.ts";
 import { t, type Locale } from "../lib/i18n.ts";
@@ -237,11 +239,6 @@ function MarkdownLink(props: {
     event.preventDefault();
     if (target.kind === "external") {
       void window.pix?.workspace?.openExternal?.(target.href);
-    } else if (target.kind === "file") {
-      void window.pix?.workspace?.openFile?.(target.path, {
-        ...(target.line ? { line: target.line } : {}),
-        ...(target.column ? { column: target.column } : {}),
-      });
     }
   }
 
@@ -277,13 +274,6 @@ function MarkdownLink(props: {
     );
   }
 
-  const fileTitle =
-    target.kind === "file"
-      ? target.line
-        ? `${target.path}:${target.line}${target.column ? `:${target.column}` : ""}`
-        : target.path
-      : undefined;
-
   // Flatten simple text children so path labels can be shortened like tool rows.
   const childrenText = (() => {
     if (typeof props.children === "string" || typeof props.children === "number") {
@@ -316,26 +306,22 @@ function MarkdownLink(props: {
     );
   }
 
+  if (target.kind === "file") {
+    return (
+      <LocalFileLink
+        target={target}
+        href={href}
+        label={fileLabel || childrenText || target.path}
+        locale={props.locale}
+        className={className}
+        id={props.id}
+      />
+    );
+  }
+
   return (
-    <a
-      href={href}
-      id={props.id}
-      onClick={open}
-      className={cn(target.kind === "file" && "content-file-link content-source-cite", className)}
-      title={props.title ?? fileTitle}
-    >
-      {target.kind === "file" ? (
-        <FileCode2 className="content-source-cite-icon" aria-hidden strokeWidth={1.75} />
-      ) : null}
-      <span className="content-source-cite-label">
-        {target.kind === "file" && fileLabel ? fileLabel : props.children}
-      </span>
-      {target.kind === "file" && target.line != null ? (
-        <span className="content-source-line" aria-hidden>
-          :{target.line}
-          {target.column != null ? `:${target.column}` : ""}
-        </span>
-      ) : null}
+    <a href={href} id={props.id} onClick={open} className={className} title={props.title}>
+      <span className="content-source-cite-label">{props.children}</span>
       {target.kind === "external" ? (
         <ExternalLink className="ml-0.5 inline size-[0.8em] align-baseline opacity-60" />
       ) : null}
@@ -405,27 +391,45 @@ export function ContentImage(props: {
     );
   }
   if (!fallback && !source) return null;
+  const mediaTarget = parseContentLink(props.src ?? "", props.workspacePath);
+  const fileActions =
+    mediaTarget.kind === "file" ? (
+      <span className="content-media-file">
+        <LocalFileLink
+          target={mediaTarget}
+          href={fallback}
+          label={formatFileLinkLabel("", mediaTarget.path, props.workspacePath)}
+          locale={props.locale}
+        />
+      </span>
+    ) : null;
   if (kind === "video") {
     return (
-      <video
-        className="content-video"
-        src={fallback}
-        controls
-        preload="metadata"
-        title={props.title}
-      >
-        {props.alt}
-      </video>
+      <>
+        <video
+          className="content-video"
+          src={fallback}
+          controls
+          preload="metadata"
+          title={props.title}
+        >
+          {props.alt}
+        </video>
+        {fileActions}
+      </>
     );
   }
 
   if (!source) {
     return (
-      <div
-        className="content-image-button content-image-loading"
-        aria-busy="true"
-        title={props.title || props.alt || t(props.locale, "timeline.imagePreview")}
-      />
+      <>
+        <span
+          className="content-image-button content-image-loading"
+          aria-busy="true"
+          title={props.title || props.alt || t(props.locale, "timeline.imagePreview")}
+        />
+        {fileActions}
+      </>
     );
   }
 
@@ -447,6 +451,7 @@ export function ContentImage(props: {
           <Maximize2 className="size-3.5" />
         </span>
       </button>
+      {fileActions}
       <ImagePreviewDialog
         open={previewOpen}
         onOpenChange={setPreviewOpen}
@@ -598,7 +603,7 @@ export const MarkdownContent = memo(function MarkdownContent(props: {
     <div className={cn("pix-md", props.className)} data-testid="markdown-content">
       <ReactMarkdown
         // remark-gfm enables GFM tables, strikethrough, task lists, and autolinks.
-        remarkPlugins={[remarkGfm, remarkMath]}
+        remarkPlugins={[remarkGfm, remarkMath, remarkLocalFileLinks]}
         rehypePlugins={[[rehypeSanitize, markdownSanitizeSchema], rehypeKatex]}
         urlTransform={safeMarkdownUrl}
         components={{

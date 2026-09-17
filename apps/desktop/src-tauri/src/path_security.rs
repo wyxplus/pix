@@ -80,7 +80,8 @@ pub fn validate_file(path: &str, passive_only: bool) -> Result<String, String> {
     if passive_only
         && ![
             "png", "jpg", "jpeg", "gif", "webp", "bmp", "avif", "heic", "tif", "tiff", "pdf",
-            "mp3", "wav", "ogg", "flac", "m4a", "mp4", "mov", "webm",
+            "mp3", "wav", "ogg", "flac", "m4a", "mp4", "mov", "webm", "docx", "xlsx", "pptx",
+            "odt", "ods", "odp", "rtf", "csv", "tsv",
         ]
         .contains(&ext.as_str())
     {
@@ -139,6 +140,14 @@ mod tests {
         assert!(check("source.ts", b"const n = 1", true).is_err());
         assert!(check("source.ts", b"const n = 1", false).is_ok());
         assert!(check("image.png", b"\x89PNG", true).is_ok());
+        for ext in [
+            "docx", "xlsx", "pptx", "odt", "ods", "odp", "rtf", "csv", "tsv",
+        ] {
+            assert!(check(&format!("report.{ext}"), b"document", true).is_ok());
+            assert!(check(&format!("disguised.{ext}"), b"MZprogram", true).is_err());
+        }
+        assert!(check("macro.docm", b"document", true).is_err());
+        assert!(check("macro.xlsm", b"document", true).is_err());
         let drops = DroppedPaths::default();
         let image = root.join("image.png");
         assert!(!drops.contains(image.to_str().unwrap()));

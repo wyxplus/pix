@@ -42,6 +42,7 @@ export const markdownSanitizeSchema: SanitizeSchema = {
   },
   protocols: {
     ...defaultSchema.protocols,
+    href: Array.from(new Set([...(defaultSchema.protocols?.href ?? []), "file"])),
     src: Array.from(
       new Set([...(defaultSchema.protocols?.src ?? []), "http", "https", "data", "file"]),
     ),

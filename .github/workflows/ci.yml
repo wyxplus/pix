@@ -32,6 +32,8 @@ jobs:
           pnpm --filter @pix/contracts exec vp test --run test/path-key.test.ts
           if ($LASTEXITCODE -ne 0) { throw 'Path regression failed' }
           pnpm --filter @pix/desktop exec vp test --run --config vite.renderer.config.ts ../main/worktree-prune.test.ts ../main/host-park-policy.test.ts ../sidecar/transport.test.ts
+      - name: Windows content file actions
+        run: pnpm --filter @pix/desktop exec vp test --run --config vite.renderer.config.ts lib/content-rendering.test.ts components/markdown-content.test.ts ../main/security.test.ts ../sidecar/path-security.test.ts
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 30

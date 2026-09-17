@@ -253,9 +253,19 @@ export class FakeOpenAiServer {
       ? "Compaction summary of the conversation."
       : hasToolResult
         ? "Tool result received."
-        : prompt.includes("rich content fixture")
-          ? richContent
-          : "Pix fake model response.";
+        : prompt.includes("local file links fixture")
+          ? [
+              "Generated files:",
+              "",
+              '[季度报告.docx](<output/季度报告 2026 v2.docx> "A short label")',
+              "",
+              "[Windows report](<C:/Users/Alice/Documents/季度报告和分析/2026 年度业务分析及完整附件/报告 2026 v2.xlsx>)",
+              "",
+              "[Shared report](file://server/share/report.pptx)",
+            ].join("\n")
+          : prompt.includes("rich content fixture")
+            ? richContent
+            : "Pix fake model response.";
     for (const part of text.split(" ")) {
       sendChunk(response, chunk({ content: `${part} ` }));
       if (this.#streamDelayMs > 0) await delay(this.#streamDelayMs);

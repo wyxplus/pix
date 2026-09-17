@@ -2595,16 +2595,16 @@ html[data-theme-skin-active="true"] :is(.composer-model-trigger, .composer-model
   color: var(--link, #3a83f7);
   @apply underline-offset-2 hover:underline;
 }
-/* File source chips use their own chrome — don't paint as plain blue underlined links. */
+/* Local references share the link accent and keep compact inline geometry. */
 .pix-md a.content-file-link,
 .pix-md a.content-source-cite {
-  color: var(--foreground);
+  color: var(--link, #3a83f7);
   text-decoration: none;
 }
 .pix-md a.content-file-link:hover,
 .pix-md a.content-source-cite:hover {
-  color: var(--foreground);
-  text-decoration: none;
+  color: var(--link, #3a83f7);
+  text-decoration: underline;
 }
 .pix-md code {
   @apply rounded bg-[var(--muted)] px-1 py-0.5 font-mono text-[0.9em];
@@ -4040,12 +4040,72 @@ html[data-custom-window-controls="true"] .content-preview-dialog-close {
 }
 .content-file-link {
   border-radius: 4px;
-  background: color-mix(in srgb, #168fc7 9%, transparent);
-  padding: 1px 3px;
+  min-width: 0;
   text-decoration: none;
 }
 .content-file-link:hover {
-  background: color-mix(in srgb, #168fc7 16%, transparent);
+  background: color-mix(in srgb, var(--link) 8%, transparent);
+}
+.content-file-reference {
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: baseline;
+}
+.content-media-file {
+  display: block;
+  margin-block: 4px 8px;
+}
+.content-file-actions {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: baseline;
+  gap: 1px;
+}
+.content-file-menu-trigger {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  align-self: center;
+  border-radius: 4px;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+.content-file-menu-trigger svg {
+  width: 14px;
+  height: 14px;
+}
+.content-file-menu-trigger:hover,
+.content-file-menu-trigger[data-state="open"] {
+  color: var(--foreground);
+  background: var(--hover-fill);
+}
+.content-file-menu-trigger:focus-visible,
+.content-file-link:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.content-file-menu-trigger:disabled,
+.content-file-link[aria-disabled="true"] {
+  opacity: 0.6;
+  cursor: progress;
+}
+.content-file-path-tooltip {
+  max-width: min(560px, calc(100vw - 24px));
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  font-family: var(--font-mono);
+}
+.content-file-menu {
+  max-width: calc(100vw - 24px);
+}
+.content-file-error {
+  display: block;
+  color: var(--destructive);
+  font-size: 0.85em;
+  overflow-wrap: anywhere;
 }
 /* File / path source citation chip */
 .content-source-cite {
@@ -4077,7 +4137,7 @@ html[data-custom-window-controls="true"] .content-preview-dialog-close {
 }
 .content-source-line {
   flex-shrink: 0;
-  color: var(--muted-foreground);
+  color: inherit;
   font-variant-numeric: tabular-nums;
   opacity: 0.85;
 }
