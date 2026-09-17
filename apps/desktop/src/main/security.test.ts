@@ -182,7 +182,9 @@ describe("external launches", () => {
   });
 
   it("opens generated documents in their associated application even when an editor exists", async () => {
-    const targets = [{ id: "vscode", name: "VS Code", kind: "ide" as const, target: "code" }];
+    // The native launch is mocked; use an existing executable on every CI platform.
+    const editor = process.execPath;
+    const targets = [{ id: "vscode", name: "VS Code", kind: "ide" as const, target: editor }];
     for (const ext of ["docx", "xlsx", "pptx", "odt", "ods", "odp", "rtf", "csv", "tsv", "pdf"]) {
       const path = join(root, `报告 v2.${ext}`);
       writeFileSync(path, "document");
@@ -196,7 +198,7 @@ describe("external launches", () => {
     await openWorkspaceFile(path, { line: 2 }, targets, native);
     expect(native).toHaveBeenCalledWith("shell.open-editor", {
       path,
-      executable: "code",
+      executable: editor,
       args: ["--goto", `${path}:2:1`],
     });
     await expect(
