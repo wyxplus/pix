@@ -17,6 +17,7 @@ type SideChatState = {
   persistenceError: string;
   hydrate: () => Promise<void>;
   flush: () => Promise<void>;
+  mergeImported: (archive: SideChatArchive) => Promise<void>;
   activate: (id: string) => void;
   bindSession: (sessionKey: string, sessionId: string) => void;
   open: (
@@ -85,6 +86,14 @@ export function createSideChatStore(storage: SideChatStorage) {
       async flush() {
         while (writing) await writing;
         if (get().persistenceError) throw new Error(get().persistenceError);
+      },
+      async mergeImported(archive) {
+        await get().hydrate();
+        set((state) => ({
+          chats: { ...archive.chats, ...state.chats },
+          activeBySession: { ...archive.activeBySession, ...state.activeBySession },
+        }));
+        await get().flush();
       },
       activate(id) {
         const chat = get().chats[id];

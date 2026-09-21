@@ -1,6 +1,7 @@
 import {
   chmodSync,
   mkdtempSync,
+  mkdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -16,8 +17,14 @@ export const MAX_ATTACHMENT_BYTES = 12_000_000;
 
 export class AttachmentStore {
   readonly directory: string;
-  constructor(tempRoot = tmpdir()) {
-    this.directory = realpathSync(mkdtempSync(join(tempRoot, "pix-attachments-")));
+  constructor(
+    tempRoot = tmpdir(),
+    private readonly persistent = false,
+  ) {
+    if (persistent) mkdirSync(tempRoot, { recursive: true, mode: 0o700 });
+    this.directory = realpathSync(
+      persistent ? tempRoot : mkdtempSync(join(tempRoot, "pix-attachments-")),
+    );
     chmodSync(this.directory, 0o700);
   }
 
@@ -42,6 +49,6 @@ export class AttachmentStore {
   }
 
   dispose(): void {
-    rmSync(this.directory, { recursive: true, force: true });
+    if (!this.persistent) rmSync(this.directory, { recursive: true, force: true });
   }
 }

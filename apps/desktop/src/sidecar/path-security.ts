@@ -1,5 +1,5 @@
 import { existsSync, statSync } from "node:fs";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { PathAccess } from "../main/path-access.ts";
 import { AttachmentStore } from "../main/attachments.ts";
 import { nativeRequest } from "./transport.ts";
@@ -9,7 +9,10 @@ export const selectedAccess = new PathAccess();
 export const sessionAccess = new PathAccess();
 export const pendingSessionCwds = new Map<string, string>();
 export const exportAccess = new PathAccess();
-export const attachments = new AttachmentStore();
+// Production bootstrap always supplies PIX_DATA_DIR. Standalone module tests use disposable data.
+export const attachments = process.env.PIX_DATA_DIR
+  ? new AttachmentStore(join(process.env.PIX_DATA_DIR, "attachments"), true)
+  : new AttachmentStore(process.env.PIX_TEMP_DIR);
 selectedAccess.grant(attachments.directory);
 
 export function rememberSession(path: string, cwd: string): void {

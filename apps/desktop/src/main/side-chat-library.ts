@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { SideChatArchive } from "@pix/contracts";
+import { createHash } from "node:crypto";
+import { normalizePathKey, type SideChatArchive } from "@pix/contracts";
 
 function record(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -15,7 +16,7 @@ function message(value: unknown): boolean {
     typeof value.text === "string"
   );
 }
-function parseArchive(value: unknown): SideChatArchive {
+export function parseSideChatArchive(value: unknown): SideChatArchive {
   if (
     !record(value) ||
     value.version !== 1 ||
@@ -82,7 +83,7 @@ export class SideChatLibrary {
   }
   load(): SideChatArchive {
     try {
-      return parseArchive(JSON.parse(readFileSync(this.path, "utf8")));
+      return parseSideChatArchive(JSON.parse(readFileSync(this.path, "utf8")));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT")
         return { version: 1, chats: {}, activeBySession: {} };
@@ -90,9 +91,44 @@ export class SideChatLibrary {
     }
   }
   save(value: unknown): void {
-    const archive = parseArchive(value);
+    const archive = parseSideChatArchive(value);
     mkdirSync(this.root, { recursive: true });
     writeFileSync(`${this.path}.tmp`, JSON.stringify(archive), { mode: 0o600, flush: true });
     renameSync(`${this.path}.tmp`, this.path);
+  }
+
+  restore(
+    source: SideChatArchive,
+    sourceSessionId: string,
+    target: { sessionId: string; sessionFile?: string },
+  ): SideChatArchive {
+    const archive = this.load();
+    const restored: SideChatArchive = { version: 1, chats: {}, activeBySession: {} };
+    const sessionKey = normalizePathKey(target.sessionFile || target.sessionId);
+    for (const chat of Object.values(source.chats)) {
+      if (chat.sessionId !== sourceSessionId) continue;
+      const id = createHash("sha256")
+        .update(JSON.stringify([target.sessionId, chat.id]))
+        .digest("hex");
+      // Retrying recovery never replaces edits made to a previously restored side chat.
+      const copy = archive.chats[id] ?? {
+        ...chat,
+        id,
+        sessionKey,
+        sessionId: target.sessionId,
+        status: chat.status === "streaming" ? ("stopped" as const) : chat.status,
+        requestId: undefined,
+        settings: { ...chat.settings, accessMode: "default" as const },
+      };
+      archive.chats[id] = copy;
+      restored.chats[id] = copy;
+      if (source.activeBySession[chat.sessionKey] === chat.id)
+        restored.activeBySession[sessionKey] = id;
+      archive.activeBySession[sessionKey] ??= id;
+    }
+    const active = restored.activeBySession[sessionKey];
+    if (active) archive.activeBySession[sessionKey] = active;
+    this.save(archive);
+    return restored;
   }
 }

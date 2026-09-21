@@ -9,6 +9,17 @@ import type {
 } from "@pix/contracts";
 
 const api: PixDesktopApi = {
+  data: {
+    archives: {
+      exportPick: (input) => ipcRenderer.invoke("pix:archives:export", input),
+      importPick: () => ipcRenderer.invoke("pix:archives:import"),
+      list: () => ipcRenderer.invoke("pix:archives:list"),
+      restoreMemories: (input) => ipcRenderer.invoke("pix:archives:restore", input),
+      continueSession: (input) => ipcRenderer.invoke("pix:archives:continue", input),
+      previewNative: (input) => ipcRenderer.invoke("pix:archives:native-preview", input),
+      deliverNative: (id) => ipcRenderer.invoke("pix:archives:native-deliver", id),
+    },
+  },
   app: {
     getRuntime: () => ipcRenderer.invoke("pix:app:get-runtime"),
     getUpdateStatus: () => ipcRenderer.invoke("pix:app:get-update-status"),

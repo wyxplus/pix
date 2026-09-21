@@ -11,7 +11,7 @@ export const app = {
   getAppPath: () => appRoot,
   isReady: () => true,
   getPath(name: "userData" | "documents" | "temp"): string {
-    if (name === "temp") return tmpdir();
+    if (name === "temp") return process.env.PIX_TEMP_DIR || tmpdir();
     if (name === "documents") return process.env.PIX_DOCUMENTS_DIR || join(homedir(), "Documents");
     const path = process.env.PIX_DATA_DIR || join(homedir(), ".pix");
     mkdirSync(path, { recursive: true });

@@ -36,9 +36,18 @@ import {
   type UpsertCustomProviderInput,
   isHostEvent,
 } from "@pix/contracts";
+import {
+  ArchiveStore,
+  archiveMarkdown,
+  encodeArchive,
+  readBounded,
+  atomicExport,
+  type PixArchive,
+} from "./archives/archive.ts";
 import { app, dialog, shell } from "./native.ts";
 import {
   attachments,
+  selectedAccess,
   authorizeFile,
   authorizeReveal,
   authorizeWorkspace,
@@ -4322,6 +4331,205 @@ function showOsNotification(payload: ShowOsNotificationPayload): Promise<boolean
 }
 
 void (async () => {
+  const archiveStore = new ArchiveStore(currentStorage().archives);
+  const { NativeTransferStore } = await import("./transfers/native-transfer.ts");
+  const nativeTransfers = new NativeTransferStore(join(currentStorage().archives, "transfers"));
+  rpc.handle("pix:archives:native-preview", async (_event, input) => {
+    if (!input || !["claude", "codex"].includes(input.target))
+      throw new Error("invalid_transfer_target");
+    const cwd = workspaceAccess.directory(input.cwd);
+    const archive = await archiveStore.read(input.archiveId);
+    const executable = await dialog.showOpenDialog(undefined, {
+      title: `Choose the ${input.target === "claude" ? "Claude Code" : "Codex"} CLI executable (checks --version only)`,
+      properties: ["openFile"],
+    });
+    if (executable.canceled || !executable.filePaths[0]) return undefined;
+    const directory = await dialog.showOpenDialog(undefined, {
+      title:
+        input.target === "claude"
+          ? "Choose Claude's existing project session folder for this workspace"
+          : "Choose the Codex data directory (CODEX_HOME)",
+      properties: ["openDirectory"],
+    });
+    if (directory.canceled || !directory.filePaths[0]) return undefined;
+    return nativeTransfers.plan({
+      archiveId: input.archiveId,
+      archive,
+      target: input.target,
+      binary: executable.filePaths[0],
+      directory: directory.filePaths[0],
+      cwd,
+    });
+  });
+  const transferring = new Set<string>();
+  rpc.handle("pix:archives:native-deliver", async (_event, id: string) => {
+    if (transferring.has(id)) throw new Error("transfer_in_progress");
+    transferring.add(id);
+    try {
+      return await nativeTransfers.deliver(id);
+    } finally {
+      transferring.delete(id);
+    }
+  });
+  const { mkdir } = await import("node:fs/promises");
+  const restoredAttachmentRoot = join(currentStorage().archives, "attachments");
+  await mkdir(restoredAttachmentRoot, { recursive: true, mode: 0o700 });
+  selectedAccess.grant(restoredAttachmentRoot);
+  rpc.handle("pix:archives:list", () => archiveStore.list());
+  rpc.handle("pix:archives:import", async () => {
+    const selected = await dialog.showOpenDialog(undefined, {
+      title: "Import Pix archive (stored as reference until adopted)",
+      properties: ["openFile"],
+      filters: [{ name: "Pix archive", extensions: ["pixarchive"] }],
+    });
+    if (selected.canceled || !selected.filePaths[0]) return undefined;
+    return archiveStore.import(await readBounded(selected.filePaths[0]));
+  });
+  rpc.handle("pix:archives:export", async (_event, input) => {
+    if (
+      !input ||
+      typeof input.personal !== "boolean" ||
+      typeof input.project !== "boolean" ||
+      typeof input.sessions !== "boolean" ||
+      !["pix", "markdown"].includes(input.format)
+    )
+      throw new Error("invalid_export");
+    const service = requireMemoryService();
+    const project =
+      input.project || input.sessions
+        ? await service.project(workspaceAccess.directory(input.cwd))
+        : undefined;
+    const exportRevision = await service.call<number>("revision");
+    const memories = await service.call<MemoryRecord[]>(
+      "exportRecords",
+      input.personal,
+      input.project ? project?.id : undefined,
+    );
+    const archive: PixArchive = {
+      format: "pix.archive",
+      version: 1,
+      createdAt: new Date().toISOString(),
+      memories,
+      suppressions: await service.call(
+        "exportSuppressions",
+        input.personal,
+        input.project ? project?.id : undefined,
+      ),
+      sessions: [],
+      sideChats: null,
+      warnings: [],
+    };
+    if (input.sessions && project) {
+      const roots = await service.call<string[]>("projectRoots", project.id);
+      try {
+        const { stdout } = await execFileAsync(
+          "git",
+          ["-C", project.root, "worktree", "list", "--porcelain", "-z"],
+          { timeout: 3000 },
+        );
+        for (const field of stdout.split("\0"))
+          if (field.startsWith("worktree ")) roots.push(field.slice(9));
+      } catch {
+        /* Non-Git project uses registered roots. */
+      }
+      const { listProjectSessions } = await import("@pix/agent-runtime");
+      const seen = new Set<string>();
+      for (const root of new Set(roots)) {
+        for (const session of await listProjectSessions(root)) {
+          if (
+            seen.has(session.id) ||
+            !roots.some((root) => normalizePathKey(root) === normalizePathKey(session.cwd))
+          )
+            continue;
+          const jsonl = (await readBounded(session.path)).toString("utf8");
+          archive.sessions.push({ id: session.id, title: session.title, jsonl });
+          seen.add(session.id);
+        }
+      }
+      const side = new SideChatLibrary(app.getPath("userData")).load();
+      archive.sideChats = {
+        version: 1,
+        chats: Object.fromEntries(
+          Object.entries(side.chats).filter(([, chat]) => seen.has(chat.sessionId)),
+        ),
+        activeBySession: Object.fromEntries(
+          Object.entries(side.activeBySession).filter(([, id]) =>
+            seen.has(side.chats[id]?.sessionId ?? ""),
+          ),
+        ),
+      };
+      archive.warnings.push(
+        "Original conversations may contain facts removed from memory. Ordinary links in prose are references; only explicit attachment metadata is packed.",
+      );
+      const { packAttachments } = await import("./archives/attachments.ts");
+      await packAttachments(archive, roots, selectedAccess);
+    }
+    const selected = await dialog.showSaveDialog(undefined, {
+      title: "Export Pix data",
+      defaultPath: `pix-${Date.now()}.${input.format === "pix" ? "pixarchive" : "md"}`,
+      filters: [
+        {
+          name: input.format === "pix" ? "Pix archive" : "Markdown",
+          extensions: [input.format === "pix" ? "pixarchive" : "md"],
+        },
+      ],
+    });
+    if (selected.canceled || !selected.filePath) return undefined;
+    if ((await service.call<number>("revision")) !== exportRevision)
+      throw new Error("Memories changed while exporting. Please export again.");
+    const bytes = input.format === "pix" ? await encodeArchive(archive) : archiveMarkdown(archive);
+    await atomicExport(selected.filePath, bytes);
+    return { path: selected.filePath, warnings: archive.warnings };
+  });
+  rpc.handle("pix:archives:restore", async (_event, input) => {
+    if (!input || typeof input.personal !== "boolean" || typeof input.project !== "boolean")
+      throw new Error("invalid_import");
+    const archive = await archiveStore.read(input.archiveId);
+    const service = requireMemoryService();
+    const project = input.project
+      ? await service.project(workspaceAccess.directory(input.cwd))
+      : undefined;
+    const result = await service.call(
+      "importRecords",
+      archive.memories,
+      input.personal,
+      project?.id,
+      archive.suppressions ?? [],
+    );
+    await supervisor?.invalidateMemory();
+    return result;
+  });
+  rpc.handle("pix:archives:continue", async (_event, input) => {
+    const cwd = workspaceAccess.directory(input.cwd);
+    const prepared = await archiveStore.prepareSession(input.archiveId, input.sessionId);
+    sessionAccess.grant(prepared.path);
+    prepared.attachments.forEach((path) => selectedAccess.grant(path));
+    const previous = await archiveStore.continuation(input.archiveId, input.sessionId, cwd);
+    if (previous?.status === "pending")
+      throw new Error(
+        "A previous import was interrupted. Inspect the project's recent sessions before importing another copy.",
+      );
+    if (previous?.sessionFile) sessionAccess.grant(previous.sessionFile);
+    if (!previous) await archiveStore.startContinuation(input.archiveId, input.sessionId, cwd);
+    const result = previous?.sessionFile
+      ? await supervisor?.switchSession(previous.sessionFile)
+      : await supervisor?.importSession(prepared.path, cwd);
+    if (!result) throw new Error("session_import_cancelled");
+    if (!result.snapshot.sessionFile) throw new Error("session_import_not_persisted");
+    if (!previous)
+      await archiveStore.completeContinuation(
+        input.archiveId,
+        input.sessionId,
+        cwd,
+        result.snapshot.sessionFile,
+      );
+    const sideChats = new SideChatLibrary(app.getPath("userData")).restore(
+      prepared.sideChats,
+      input.sessionId,
+      result.snapshot,
+    );
+    return { sideChats };
+  });
   // Name + About/Dock icon (must be after ready for About panel iconPath on some builds).
   themeLibrary = new ThemeLibrary(app.getPath("userData"));
   const initialPrefs = loadDesktopPrefs();
