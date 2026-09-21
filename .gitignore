@@ -25,6 +25,12 @@ apps/desktop/runtimes/**
 # pi session exports / accidental test cwd dumps (exportToJsonl default path)
 session-*.jsonl
 
+# Local memory acceptance/eval reports. Everything under fixtures/ is the output
+# of a local run (host platform/arch, source and artifact hashes, timestamps or
+# real model output), so none of it is tracked. The reproducible dataset audits
+# live in the eval scripts and in the tracked documentation.
+apps/desktop/scripts/eval/fixtures/
+
 # Local environment
 .env
 .env.*
