@@ -141,6 +141,7 @@ import { isConversationWorkspacePath, workspaceLabel } from "../../lib/workspace
 import { useShellStore, type SettingsSection } from "../../store/shell-store.ts";
 import { PiSdkSection } from "./PiSdkSection.tsx";
 import { RuntimesSection } from "./RuntimesSection.tsx";
+import { MemorySection } from "./MemorySection.tsx";
 import { WindowCloseSettings } from "./WindowCloseSettings.tsx";
 import { ThemeSkinStudio } from "./ThemeSkinStudio.tsx";
 import {
@@ -223,7 +224,9 @@ export function SettingsPage(props: SettingsPageProps) {
         data-testid="settings-top-cap"
       />
       <div className="settings-page-body">
-        {props.section === "general" ? (
+        {props.section === "memory" ? (
+          <MemorySection locale={props.locale} cwd={props.snapshot?.cwd} />
+        ) : props.section === "general" ? (
           <GeneralSection {...props} tr={tr} />
         ) : props.section === "pi" ? (
           <PiSdkSection locale={props.locale} />

@@ -798,6 +798,12 @@ function SettingsRail(props: {
       labelKey: "settings.group.data",
       items: [
         {
+          section: "memory",
+          testId: "settings-nav-memory",
+          labelKey: "section.memory",
+          icon: <Archive className="size-3.5 shrink-0 opacity-70" strokeWidth={1.75} />,
+        },
+        {
           section: "archived",
           testId: "settings-nav-archived",
           labelKey: "section.archived",

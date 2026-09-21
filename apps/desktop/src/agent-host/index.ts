@@ -1,3 +1,4 @@
+import { MEMORY_EXTRACTION_PROMPT, MEMORY_CONSOLIDATION_PROMPT } from "@pix/agent-runtime";
 import "./proxy-bootstrap.ts";
 import {
   createPixRuntime,
@@ -17,6 +18,10 @@ import {
   isHostCommand,
   isHostEvent,
   type RuntimeEvent,
+  type MemoryContext,
+  type MemoryLearningJob,
+  type MemoryLearningSource,
+  type MemoryConsolidationPlan,
 } from "@pix/contracts";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { readFile } from "node:fs/promises";
@@ -24,6 +29,91 @@ import { ProviderOAuthCoordinator, type OAuthModelRuntime } from "./provider-oau
 import { MessageIdentity } from "./message-identity.ts";
 
 const messageIdentity = new MessageIdentity();
+const memoryRequests = new Map<
+  string,
+  {
+    resolve: (value: unknown) => void;
+    reject: (error: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }
+>();
+let memoryRequestSequence = 0;
+function memoryRequest<T>(action: string, input: unknown): Promise<T> {
+  const id = `memory-${++memoryRequestSequence}`;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      memoryRequests.delete(id);
+      reject(new Error("memory_timeout"));
+    }, 1500);
+    memoryRequests.set(id, { resolve: (value) => resolve(value as T), reject, timer });
+    process.send?.({ type: "pix.memory.read", id, runtimeId: handle?.runtimeId, action, input });
+  });
+}
+
+function readMemoryContext(query: string): Promise<MemoryContext> {
+  return memoryRequest("context", { query });
+}
+let learningController: AbortController | undefined;
+async function learnFromTurn(
+  runtimeHandle: PixRuntimeHandle,
+  epoch: number,
+  previousIds: Set<string>,
+) {
+  const sources: MemoryLearningSource[] = runtimeHandle.runtime.session.sessionManager
+    .getBranch()
+    .flatMap((entry) => {
+      if (previousIds.has(entry.id) || entry.type !== "message" || entry.message.role !== "user")
+        return [];
+      const text =
+        typeof entry.message.content === "string"
+          ? entry.message.content
+          : entry.message.content.flatMap((p) => (p.type === "text" ? [p.text] : [])).join("\n");
+      if (!text.trim() || text.length > 4000) return [];
+      return [{ sessionId: runtimeHandle.runtime.session.sessionId, entryId: entry.id, text }];
+    })
+    .slice(-20);
+  if (!sources.length) return;
+  const job = await memoryRequest<MemoryLearningJob | null>("beginLearning", { epoch, sources });
+  if (!job) return;
+  const controller = new AbortController();
+  learningController = controller;
+  const timeout = setTimeout(() => controller.abort(), 60_000);
+  try {
+    const result = await runtimeHandle.completeText(
+      JSON.stringify({ scopes: job.scopes, sources: job.sources }),
+      {
+        isolated: true,
+        maxTokens: 1500,
+        signal: controller.signal,
+        systemPrompt: MEMORY_EXTRACTION_PROMPT,
+      },
+    );
+    const candidates: unknown = JSON.parse(result);
+    const plan = await memoryRequest<MemoryConsolidationPlan | null>("prepareConsolidation", {
+      id: job.id,
+      candidates,
+    });
+    if (!plan) return;
+    const decisions: unknown = JSON.parse(
+      await runtimeHandle.completeText(JSON.stringify(plan), {
+        isolated: true,
+        maxTokens: 1500,
+        signal: controller.signal,
+        systemPrompt: MEMORY_CONSOLIDATION_PROMPT,
+      }),
+    );
+    await memoryRequest("finishLearning", { id: job.id, candidates: [], decisions });
+  } catch {
+    await memoryRequest("finishLearning", {
+      id: job.id,
+      candidates: [],
+      error: "extraction_failed",
+    }).catch(() => {});
+  } finally {
+    clearTimeout(timeout);
+    if (learningController === controller) learningController = undefined;
+  }
+}
 
 function sessionHistory(runtimeHandle: PixRuntimeHandle) {
   const manager = runtimeHandle.runtime.session.sessionManager;
@@ -390,6 +480,7 @@ async function handleCommand(command: HostCommand): Promise<void> {
         unsubscribe = undefined;
         await handle?.dispose();
         const options: CreatePixRuntimeOptions = {
+          readMemoryContext,
           cwd: command.cwd,
           appendSystemPrompt: [
             "Pix desktop renders local Markdown file links with Open file and Show in folder actions.",
@@ -440,6 +531,12 @@ async function handleCommand(command: HostCommand): Promise<void> {
             promptImageRoots(handle.runtime.cwd),
           );
         }
+        learningController?.abort();
+        const learningPolicy = await readMemoryContext("").catch(() => undefined);
+        const turnHandle = handle;
+        const previousIds = new Set(
+          handle.runtime.session.sessionManager.getBranch().map((entry) => entry.id),
+        );
         await handle.runtime.session.prompt(
           command.message,
           Object.keys(promptOptions).length > 0 ? promptOptions : undefined,
@@ -450,6 +547,8 @@ async function handleCommand(command: HostCommand): Promise<void> {
           requestId: command.requestId,
           snapshot: handle.snapshot(++sequence),
         });
+        if (learningPolicy?.learning && handle === turnHandle)
+          void learnFromTurn(turnHandle, learningPolicy.epoch, previousIds).catch(() => {});
         break;
       }
       case "agent.queue.clear": {
@@ -464,6 +563,7 @@ async function handleCommand(command: HostCommand): Promise<void> {
         break;
       }
       case "agent.abort": {
+        learningController?.abort();
         if (!handle) throw new Error("Agent Host is not ready");
         const session = handle.runtime.session;
         // session.abort() only signals the agent loop + waits for idle. Ancillary
@@ -1212,6 +1312,7 @@ async function handleCommand(command: HostCommand): Promise<void> {
         break;
       }
       case "host.shutdown": {
+        learningController?.abort();
         providerOAuth.cancel();
         unsubscribe?.();
         unsubscribe = undefined;
@@ -1231,6 +1332,21 @@ async function handleCommand(command: HostCommand): Promise<void> {
 }
 
 process.on("message", (message) => {
+  if (
+    message &&
+    typeof message === "object" &&
+    "type" in message &&
+    message.type === "pix.memory.result"
+  ) {
+    const response = message as unknown as { id: string; value?: unknown; error?: string };
+    const pending = memoryRequests.get(response.id);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    memoryRequests.delete(response.id);
+    if (response.error) pending.reject(new Error("memory_unavailable"));
+    else pending.resolve(response.value);
+    return;
+  }
   if (!isHostCommand(message)) {
     post(errorEvent(new Error("Rejected invalid Agent Host command")));
     return;

@@ -13,6 +13,7 @@ import {
   type HostCommand,
   type HostEvent,
   type HostSnapshot,
+  type MemoryRecord,
   type SideChatRequest,
   type ModelSummary,
   type ModelsJsonConfigView,
@@ -147,6 +148,13 @@ import { ThemeLibrary } from "../main/theme-library.ts";
 import { SideChatLibrary } from "../main/side-chat-library.ts";
 import { pruneManagedWorktreesSafely, removeWorktreeSafely } from "../main/worktree-prune.ts";
 import { sideChatPrompt, SIDE_CHAT_SYSTEM_PROMPT } from "../main/side-chat.ts";
+import { MemoryService } from "./memory/service.ts";
+
+let memoryService: MemoryService | undefined;
+function requireMemoryService(): MemoryService {
+  if (!memoryService) throw new Error("memory_service_unavailable");
+  return memoryService;
+}
 
 /**
  * WorkBuddy-style managed runtimes:
@@ -2905,6 +2913,24 @@ class HostSupervisor {
     return event.snapshot;
   }
 
+  async invalidateMemory(): Promise<void> {
+    const hosts = [this.#host, ...[...this.#parked.values()].map((item) => item.host)];
+    await Promise.all(
+      hosts.map(async (host) => {
+        if (!host?.child.connected || host.stopping) return;
+        try {
+          await this.#request(
+            { protocolVersion: IPC_PROTOCOL_VERSION, type: "agent.abort", requestId: randomUUID() },
+            host,
+          );
+        } catch {
+          // A host that cannot acknowledge invalidation must not keep a stale provider request alive.
+          host.child.kill();
+        }
+      }),
+    );
+  }
+
   async clearQueue(): Promise<HostSnapshot> {
     if (!this.#host) throw new Error("Agent Host is not running");
     const event = await this.#request({
@@ -4030,6 +4056,64 @@ class HostSupervisor {
     });
 
     child.on("message", (message) => {
+      if (
+        message &&
+        typeof message === "object" &&
+        "type" in message &&
+        message.type === "pix.memory.read"
+      ) {
+        const request = message as {
+          id?: unknown;
+          runtimeId?: unknown;
+          action?: unknown;
+          input?: unknown;
+        };
+        if (typeof request.id !== "string" || host.ignoreMessages) return;
+        const bound = this.#host === host ? this.#snapshot : this.#findParkedByHost(host)?.snapshot;
+        void (async () => {
+          try {
+            if (!bound || request.runtimeId !== bound.runtimeId) throw new Error("out_of_scope");
+            const service = requireMemoryService();
+            const policy = await service.preferences();
+            const project =
+              policy.shortTerm &&
+              !isAutoDefaultWorkspacePath(bound.cwd) &&
+              !isConversationWorkspacePath(bound.cwd)
+                ? await service.project(bound.cwd)
+                : undefined;
+            const input = request.input as Record<string, unknown> | undefined;
+            let value: unknown;
+            if (
+              request.action === "context" &&
+              typeof input?.query === "string" &&
+              input.query.length <= 8000
+            )
+              value = await service.context(project?.id, input.query);
+            else if (request.action === "beginLearning" && input)
+              value = await service.call("beginLearning", input.epoch, project?.id, input.sources);
+            else if (request.action === "finishLearning" && input)
+              value = await service.call(
+                "finishLearning",
+                input.id,
+                input.candidates,
+                input.error,
+                input.decisions,
+              );
+            else if (request.action === "prepareConsolidation" && input)
+              value = await service.call("prepareConsolidation", input.id, input.candidates);
+            else throw new Error("invalid_memory_request");
+            if (child.connected)
+              child.send({ type: "pix.memory.result", id: request.id, value }, () => {});
+          } catch {
+            if (child.connected)
+              child.send(
+                { type: "pix.memory.result", id: request.id, error: "memory_unavailable" },
+                () => {},
+              );
+          }
+        })();
+        return;
+      }
       if (host.ignoreMessages || !isHostEvent(message)) return;
       if (message.type === "util.text-delta") {
         if (this.#sideChatRequests.get(message.requestId) === host && !this.window.isClosed()) {
@@ -4219,14 +4303,14 @@ class HostSupervisor {
     if (snapshot.sessionFile) this.#sessionFile = snapshot.sessionFile;
   }
 
-  #request(command: HostCommand): Promise<HostEvent> {
-    const host = this.#host;
+  #request(command: HostCommand, host = this.#host): Promise<HostEvent> {
     if (!host || host.ignoreMessages) return Promise.reject(new Error("Agent Host is not running"));
     if (command.type === "util.complete-text" || command.type === "util.side-chat")
       host.utilityRequestIds.add(command.requestId);
     // Capture the map identity so timeouts still work after the host is parked
     // (park moves this Map onto the ParkedHost entry).
-    const pendingMap = this.#pending;
+    const pendingMap = host === this.#host ? this.#pending : this.#findParkedByHost(host)?.pending;
+    if (!pendingMap) return Promise.reject(new Error("Agent Host is not registered"));
 
     return new Promise((resolve, reject) => {
       const timeoutMs = hostCommandTimeoutMs(command.type);
@@ -4338,6 +4422,7 @@ function showOsNotification(payload: ShowOsNotificationPayload): Promise<boolean
 }
 
 void (async () => {
+  memoryService = new MemoryService(currentStorage().memory);
   const desktopPreferences = new DesktopPreferences(
     join(currentStorage().desktop, "preferences.json"),
   );
@@ -4553,6 +4638,48 @@ void (async () => {
       result.snapshot,
     );
     return { sideChats };
+  });
+  rpc.handle("pix:memory:state", () => requireMemoryService().state());
+  rpc.handle("pix:memory:project", (_event, cwd: string) => {
+    const root = workspaceAccess.directory(cwd);
+    if (isAutoDefaultWorkspacePath(root) || isConversationWorkspacePath(root))
+      throw new Error("no_project");
+    return requireMemoryService().project(root);
+  });
+  rpc.handle("pix:memory:list", (_event, input) => requireMemoryService().list(input));
+  rpc.handle("pix:memory:create", async (_event, input) => {
+    const record = await requireMemoryService().create(input);
+    await supervisor?.invalidateMemory();
+    return record;
+  });
+  rpc.handle("pix:memory:update", async (_event, input) => {
+    const record = await requireMemoryService().update(input);
+    await supervisor?.invalidateMemory();
+    return record;
+  });
+  rpc.handle("pix:memory:resolve", async (_event, input) => {
+    const result = await requireMemoryService().call("resolve", input);
+    await supervisor?.invalidateMemory();
+    return result;
+  });
+  rpc.handle("pix:memory:preferences", async (_event, patch, revision) => {
+    const policy = await requireMemoryService().patchPreferences(patch, revision);
+    await supervisor?.invalidateMemory();
+    return policy;
+  });
+  rpc.handle("pix:memory:forget", async (_event, ids) => {
+    try {
+      await requireMemoryService().forget(ids);
+    } finally {
+      await supervisor?.invalidateMemory();
+    }
+  });
+  rpc.handle("pix:memory:clear", async (_event, input) => {
+    try {
+      await requireMemoryService().clear(input);
+    } finally {
+      await supervisor?.invalidateMemory();
+    }
   });
   // Name + About/Dock icon (must be after ready for About panel iconPath on some builds).
   themeLibrary = new ThemeLibrary(app.getPath("userData"));
@@ -5370,6 +5497,7 @@ void (async () => {
     piTuiController?.disposeAll();
     piTuiGuard.release();
     await supervisor?.stop();
+    await memoryService?.close();
     await desktopPreferences.read();
     attachments.dispose();
   });

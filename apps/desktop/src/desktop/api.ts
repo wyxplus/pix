@@ -30,6 +30,17 @@ const api: PixDesktopApi = {
       deliverNative: (id) => ipcRenderer.invoke("pix:archives:native-deliver", id),
     },
   },
+  memory: {
+    state: () => ipcRenderer.invoke("pix:memory:state"),
+    preferences: (patch, revision) => ipcRenderer.invoke("pix:memory:preferences", patch, revision),
+    project: (cwd) => ipcRenderer.invoke("pix:memory:project", cwd),
+    list: (input) => ipcRenderer.invoke("pix:memory:list", input),
+    create: (input) => ipcRenderer.invoke("pix:memory:create", input),
+    update: (input) => ipcRenderer.invoke("pix:memory:update", input),
+    resolve: (input) => ipcRenderer.invoke("pix:memory:resolve", input),
+    forget: (ids) => ipcRenderer.invoke("pix:memory:forget", ids),
+    clear: (input) => ipcRenderer.invoke("pix:memory:clear", input),
+  },
   app: {
     getRuntime: () => ipcRenderer.invoke("pix:app:get-runtime"),
     getUpdateStatus: () => ipcRenderer.invoke("pix:app:get-update-status"),

@@ -1,3 +1,4 @@
+export { MEMORY_EXTRACTION_PROMPT, MEMORY_CONSOLIDATION_PROMPT } from "./memory-extraction.ts";
 import { loadPromptImages, promptImageRoots } from "./prompt-images.ts";
 export { loadPromptImages, promptImageRoots } from "./prompt-images.ts";
 import { isPlainSettingObject, mergeSettingValue } from "./settings-merge.ts";
@@ -142,6 +143,7 @@ export {
   isThinkingLevel,
 } from "./thinking-levels.ts";
 
+import { installMemoryContext, type ReadMemoryContext } from "./memory-context.ts";
 const MACOS_GITHUB_CLI_PATHS = ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"] as const;
 
 /** Per-runtime OpenAI service_tier preference (not a pi session field). */
@@ -223,6 +225,7 @@ export function resolveGitHubCliCommand(
 }
 
 export interface CreatePixRuntimeOptions {
+  readMemoryContext?: ReadMemoryContext;
   cwd: string;
   /**
    * Defaults to pi `getAgentDir()` (`~/.pi/agent` or `PI_CODING_AGENT_DIR`).
@@ -370,6 +373,8 @@ export interface PixRuntimeHandle {
       messages?: SideChatRequest["messages"];
       signal?: AbortSignal;
       onDelta?: (delta: string) => void;
+      isolated?: boolean;
+      maxTokens?: number;
     },
   ): Promise<string>;
   sideChat(
@@ -1670,6 +1675,7 @@ export async function createPixRuntime(
 
   await bindExtensionUi();
   installContentLanguageStreamHook(runtime.session);
+  installMemoryContext(runtime.session, options.readMemoryContext);
   // Official catalog thinkingLevelMap for custom models that only set reasoning:true.
   await ensureSessionModelThinkingMap(runtime.session, runtime.services);
   const serviceTierCatalogPeers = () => catalogModelPeers(runtime.services);
@@ -1685,6 +1691,7 @@ export async function createPixRuntime(
     const result = await operation();
     await bindExtensionUi();
     installContentLanguageStreamHook(runtime.session);
+    installMemoryContext(runtime.session, options.readMemoryContext);
     await ensureSessionModelThinkingMap(runtime.session, runtime.services);
     // New Agent instance after switch/fork/new — bind after extensions so this stays outermost.
     installServiceTierPayloadHook(
@@ -1703,6 +1710,7 @@ export async function createPixRuntime(
       },
     });
     installContentLanguageStreamHook(runtime.session);
+    installMemoryContext(runtime.session, options.readMemoryContext);
     await ensureSessionModelThinkingMap(runtime.session, runtime.services);
     installServiceTierPayloadHook(
       runtime.session.agent,
@@ -2328,11 +2336,13 @@ export async function createPixRuntime(
       }
       if (!model) throw new Error("没有可用模型，请先在设置中配置模型");
       const context: Parameters<typeof modelRuntime.completeSimple>[1] = {
-        systemPrompt: appendLanguageReference(
-          options?.systemPrompt ??
-            "You are a helpful assistant. Reply with only the requested text.",
-          sessionLanguageReference(runtime.session, options?.messages),
-        ),
+        systemPrompt: options?.isolated
+          ? (options.systemPrompt ?? "")
+          : appendLanguageReference(
+              options?.systemPrompt ??
+                "You are a helpful assistant. Reply with only the requested text.",
+              sessionLanguageReference(runtime.session, options?.messages),
+            ),
         messages: options?.messages?.map((message) =>
           message.role === "user"
             ? { role: "user" as const, content: message.text, timestamp: Date.now() }
@@ -2369,11 +2379,10 @@ export async function createPixRuntime(
       }
       const result = stream
         ? await stream.result()
-        : await modelRuntime.completeSimple(
-            model,
-            context,
-            options?.signal ? { signal: options.signal } : {},
-          );
+        : await modelRuntime.completeSimple(model, context, {
+            ...(options?.signal ? { signal: options.signal } : {}),
+            ...(options?.maxTokens ? { maxTokens: options.maxTokens } : {}),
+          });
       if (result.stopReason === "error" || result.stopReason === "aborted") {
         throw new Error(
           result.errorMessage ||

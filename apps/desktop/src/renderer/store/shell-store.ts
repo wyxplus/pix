@@ -89,6 +89,7 @@ export type ColorMode = ResolvedColorMode;
 export type { ThemePreference, ResolvedColorMode };
 /** Implemented settings sections only (no stub / coming-soon nav). */
 export type SettingsSection =
+  | "memory"
   | "general"
   | "appearance"
   | "terminal"
