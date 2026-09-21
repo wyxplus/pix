@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { FakeOpenAiServer } from "../../../packages/test-utils/src/index.ts";
 
 /**
- * @param {{ isolated?: boolean }} options
+ * @param {{ isolated?: boolean, fakeModelOptions?: Record<string, unknown> }} options
  * @returns {Promise<{ environment: NodeJS.ProcessEnv, cleanup: () => Promise<void>, label: string }>}
  */
 export async function prepareLaunchEnv(options = {}) {
@@ -53,7 +53,7 @@ export async function prepareLaunchEnv(options = {}) {
   const toolPath = join(workspace, "fixture.txt");
   await writeFile(toolPath, "Pix isolated launch fixture\n");
 
-  const fakeModel = new FakeOpenAiServer({ toolPath });
+  const fakeModel = new FakeOpenAiServer({ ...options.fakeModelOptions, toolPath });
   await fakeModel.start();
   await writeFile(
     join(agentDir, "models.json"),

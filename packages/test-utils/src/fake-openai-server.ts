@@ -17,6 +17,8 @@ interface FakeOpenAiServerOptions {
   rateLimitFailures?: number;
   /** Delay between streamed tokens for queue/steer fixtures (ms). */
   streamDelayMs?: number;
+  /** Optional deterministic completion for integration fixtures. Undefined uses normal behavior. */
+  responseText?: (request: ChatRequest) => string | undefined;
 }
 
 interface ChatMessage {
@@ -65,6 +67,7 @@ export class FakeOpenAiServer {
   #toolCall: { name: string; arguments: Record<string, unknown> };
   #remainingRateLimits: number;
   #streamDelayMs: number;
+  #responseText: FakeOpenAiServerOptions["responseText"];
 
   constructor(options: FakeOpenAiServerOptions) {
     this.#toolPath = options.toolPath;
@@ -74,6 +77,7 @@ export class FakeOpenAiServer {
     };
     this.#remainingRateLimits = options.rateLimitFailures ?? 0;
     this.#streamDelayMs = options.streamDelayMs ?? 0;
+    this.#responseText = options.responseText;
     this.#server = createServer((request, response) => {
       void this.#handle(request, response);
     });
@@ -146,6 +150,16 @@ export class FakeOpenAiServer {
     });
 
     sendChunk(response, chunk({ role: "assistant", content: "" }));
+    const scripted = this.#responseText?.(parsed);
+    if (scripted !== undefined) {
+      sendChunk(response, chunk({ content: scripted }));
+      sendChunk(response, {
+        ...chunk({}, "stop"),
+        usage: { prompt_tokens: 12, completion_tokens: 4, total_tokens: 16 },
+      });
+      response.end("data: [DONE]\n\n");
+      return;
+    }
 
     // Hang open after the first delta so hosts can exercise abort mid-stream.
     if (prompt.includes("abort") && !prompt.includes("stream slowly")) {

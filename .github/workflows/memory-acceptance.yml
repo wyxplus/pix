@@ -1,0 +1,110 @@
+name: Memory installer acceptance
+on:
+  workflow_dispatch:
+  push:
+    branches: ["codex/memory-acceptance-*"]
+permissions:
+  contents: read
+concurrency:
+  group: memory-installer-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  installed:
+    name: Installed memory (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    env:
+      npm_config_verify_deps_before_run: "false"
+      APPLE_SIGNING_IDENTITY: "-"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.15.1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+      - name: Linux native libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xvfb
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm build:desktop
+      - name: Stage real runtime dependencies
+        run: pnpm --filter @pix/desktop exec node scripts/prepare-sidecar.mjs --release
+      - name: Build macOS installer
+        if: runner.os == 'macOS'
+        run: pnpm --filter @pix/desktop exec tauri build --bundles app,dmg
+      - name: Build Windows installer
+        if: runner.os == 'Windows'
+        run: pnpm --filter @pix/desktop exec tauri build --bundles nsis
+      - name: Build Linux installer
+        if: runner.os == 'Linux'
+        run: pnpm --filter @pix/desktop exec tauri build --bundles deb
+      - name: Install and test macOS DMG
+        if: runner.os == 'macOS'
+        env:
+          TARGET_TRIPLE: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          mkdir -p validation "$RUNNER_TEMP/pix-dmg" "$RUNNER_TEMP/Pix 安装"
+          artifact=$(find apps/desktop/src-tauri/target/release/bundle/dmg -name '*.dmg' -print -quit)
+          hdiutil attach "$artifact" -nobrowse -readonly -mountpoint "$RUNNER_TEMP/pix-dmg"
+          ditto "$RUNNER_TEMP/pix-dmg/Pix.app" "$RUNNER_TEMP/Pix 安装/Pix.app"
+          hdiutil detach "$RUNNER_TEMP/pix-dmg"
+          node apps/desktop/scripts/installed-package-validation.mjs --installed-root "$RUNNER_TEMP/Pix 安装/Pix.app" --target "$TARGET_TRIPLE" --artifact "$artifact" --out validation/installed.json
+      - name: Install and test Windows NSIS
+        if: runner.os == 'Windows'
+        env:
+          TARGET_TRIPLE: ${{ matrix.target }}
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path validation -Force | Out-Null
+          $artifact = Get-ChildItem apps/desktop/src-tauri/target/release/bundle/nsis -Filter '*-setup.exe' | Select-Object -First 1
+          if (!$artifact) { throw 'NSIS installer missing' }
+          $installed = Join-Path $env:RUNNER_TEMP 'Pix 安装'
+          $process = Start-Process -FilePath $artifact.FullName -ArgumentList "/S /D=$installed" -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw 'NSIS installation failed' }
+          node apps/desktop/scripts/installed-package-validation.mjs --installed-root $installed --target $env:TARGET_TRIPLE --artifact $artifact.FullName --out validation/installed.json
+          if ($LASTEXITCODE -ne 0) { throw 'Installed memory validation failed' }
+          $env:PIX_NATIVE_EXECUTABLE = Join-Path $installed 'pix-desktop.exe'
+          node apps/desktop/scripts/windows-native-smoke.test.mjs 2>&1 | Tee-Object -FilePath validation/native-window.log
+          if ($LASTEXITCODE -ne 0) { throw 'Installed native window validation failed' }
+      - name: Extract and test Linux DEB
+        if: runner.os == 'Linux'
+        env:
+          TARGET_TRIPLE: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          mkdir -p validation "$RUNNER_TEMP/Pix 安装"
+          artifact=$(find apps/desktop/src-tauri/target/release/bundle/deb -name '*.deb' -print -quit)
+          dpkg-deb -x "$artifact" "$RUNNER_TEMP/Pix 安装"
+          worker=$(find "$RUNNER_TEMP/Pix 安装" -name memory-worker.mjs -print -quit)
+          resources=$(dirname "$(dirname "$(dirname "$(dirname "$worker")")")")
+          node=$(find "$RUNNER_TEMP/Pix 安装" -type f -name node -print -quit)
+          xvfb-run -a node apps/desktop/scripts/installed-package-validation.mjs --installed-root "$RUNNER_TEMP/Pix 安装" --resources "$resources" --node "$node" --target "$TARGET_TRIPLE" --artifact "$artifact" --out validation/installed.json
+      - name: Archive independent evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: memory-validation-${{ matrix.target }}
+          path: validation/
+          if-no-files-found: warn
+          retention-days: 14

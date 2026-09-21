@@ -1,0 +1,15 @@
+{
+  "datasetSha256": "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442",
+  "cases": 500,
+  "categories": {
+    "single-session-user": 70,
+    "multi-session": 133,
+    "single-session-preference": 30,
+    "temporal-reasoning": 133,
+    "knowledge-update": 78,
+    "single-session-assistant": 56
+  },
+  "unorderedSessionDates": 211,
+  "lastTwoFileSessionsDifferFromChronologicalLatest": 159,
+  "interpretation": "The frozen current protocol preserves dataset file order. The recent baseline means final two listed sessions, not strictly the latest two by timestamp. Memory learning also preserves file order while including source timestamps. This is a documented evaluation choice and a limitation of temporal baseline interpretation."
+}

@@ -91,6 +91,49 @@ await test(
       await page.getByTestId("models-custom-group-custom:pix-fake-toggle").click();
       await page.getByTestId("provider-row-pix-fake").waitFor();
       console.log("Installed model settings loaded successfully");
+      await page.getByTestId("settings-nav-memory").click();
+      await page.getByTestId("settings-memory").waitFor();
+      assert.equal(
+        await page.getByTestId("memory-long-term").getAttribute("aria-checked"),
+        "false",
+      );
+      assert.equal(
+        await page.getByTestId("memory-short-term").getAttribute("aria-checked"),
+        "false",
+      );
+      await page.getByTestId("memory-long-term").click();
+      await page.waitForFunction(
+        async () => (await window.pix.memory.state()).preferences.longTerm,
+      );
+      await page
+        .getByRole("textbox", { name: /Memory content|记忆内容/ })
+        .fill("INSTALLED_WINDOWS_MEMORY_SAPPHIRE");
+      await page.getByRole("button", { name: /^(Remember|记住)$/ }).click();
+      await page
+        .locator("article")
+        .filter({ hasText: "INSTALLED_WINDOWS_MEMORY_SAPPHIRE" })
+        .waitFor();
+      await page.getByTestId("memory-long-term").click();
+      await page.waitForFunction(
+        async () => !(await window.pix.memory.state()).preferences.longTerm,
+      );
+      await page.reload();
+      await page.locator('[data-testid="pix-app"][data-bootstrap-ready="true"]').waitFor();
+      await page.getByTestId("nav-settings").click();
+      await page.getByTestId("settings-nav-memory").click();
+      assert.equal(
+        await page.getByTestId("memory-long-term").getAttribute("aria-checked"),
+        "false",
+      );
+      const record = page
+        .locator("article")
+        .filter({ hasText: "INSTALLED_WINDOWS_MEMORY_SAPPHIRE" });
+      await record.waitFor();
+      await record.getByRole("button", { name: /Forget|遗忘/ }).click();
+      await record.waitFor({ state: "detached" });
+      console.log(
+        "Installed memory settings: opt-in, durable record, disabled persistence and forgetting passed",
+      );
       await page.getByTestId("settings-back").click();
       await page.getByTestId("model-select-wrap").click();
       await page.getByTestId("composer-model-list-trigger").click();
@@ -118,7 +161,9 @@ await test(
         "Hiding must preserve the active Host",
       );
       assert.equal(
-        await page.evaluate(() => localStorage.getItem("pix.window.closeBehavior")),
+        await page.evaluate(
+          async () => (await window.pix.data.preferences.read())["pix.window.closeBehavior"],
+        ),
         "tray",
       );
       console.log("Installed close prompt hid the window to a live tray and kept the Host running");

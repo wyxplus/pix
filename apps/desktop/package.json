@@ -26,7 +26,16 @@
     "tauri": "tauri",
     "sidecar:prepare": "node scripts/prepare-sidecar.mjs",
     "check:rust": "node scripts/prepare-sidecar.mjs && cargo check --manifest-path src-tauri/Cargo.toml",
-    "test:sidecar": "pnpm run build && node scripts/sidecar-smoke.test.mjs"
+    "test:sidecar": "pnpm run build && node scripts/sidecar-smoke.test.mjs",
+    "test:memory": "pnpm run build && vp test --run --config vite.renderer.config.ts ../sidecar/memory ../sidecar/archives ../sidecar/storage ../sidecar/transfers && pnpm --filter @pix/agent-runtime exec vp test --run test/memory-context.test.ts && node scripts/memory-smoke.test.mjs && node scripts/eval/longmemeval.test.mjs && node scripts/eval/report.test.mjs && node scripts/eval/model-budget.test.mjs && node --experimental-transform-types scripts/eval/corpus.test.mjs && playwright test e2e/memory.spec.ts",
+    "eval:memory": "node scripts/eval/longmemeval.mjs",
+    "eval:memory:fetch": "node scripts/eval/fetch-longmemeval.mjs",
+    "eval:memory:report": "node scripts/eval/report.mjs",
+    "eval:memory:judge": "node scripts/eval/judge.mjs",
+    "eval:memory:judge-live": "node scripts/eval/judge-live.mjs",
+    "eval:memory:retrieval": "node scripts/eval/retrieval.mjs",
+    "eval:memory:acceptance": "node --experimental-transform-types scripts/eval/acceptance.mjs",
+    "eval:memory:preflight": "node scripts/eval/preflight.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "catalog:",

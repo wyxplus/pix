@@ -1,0 +1,40 @@
+{
+  "datasetSha256": "d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442",
+  "selectedCases": 500,
+  "modelCalls": 0,
+  "workload": {
+    "sessions": 23867,
+    "extractionBatches": 23487,
+    "maximumConsolidationCalls": 23487,
+    "answerCalls": 2000,
+    "officialJudgeCalls": 2000,
+    "skippedOversizedSources": 458
+  },
+  "bytes": {
+    "extractionInputs": 59319393,
+    "fullReference": 256766049,
+    "recentReference": 10793718,
+    "maximumFullReference": 537915
+  },
+  "maximumRequestedOutputTokens": {
+    "extraction": 35230500,
+    "consolidation": 35230500,
+    "answering": 2048000,
+    "officialJudge": 20000
+  },
+  "limitations": [
+    "No tokenizer or provider quote: byte totals are not token estimates.",
+    "Consolidation input size depends on learned records. Run a priced pilot before selecting the full allowance.",
+    "Store policy may skip batches after its per-case daily allowance; actual calls can be lower. Skips remain visible in run reports.",
+    "Official judge gpt-4o-2024-08-06 needs separate access and a separate allowance; changing judge model makes scores non-official."
+  ],
+  "approvalRequired": {
+    "evaluationProvider": null,
+    "evaluationModel": null,
+    "providerInputPrice": null,
+    "providerOutputPrice": null,
+    "runBudgetUsd": null,
+    "judgeProvider": null,
+    "judgeBudgetUsd": null
+  }
+}

@@ -21,7 +21,16 @@
     "version:set": "node scripts/set-version.mjs",
     "test:release-assets": "node scripts/release-assets.test.mjs",
     "test:release-version": "node --test scripts/next-version.test.mjs scripts/set-version.test.mjs",
-    "check:rust": "pnpm --filter @pix/desktop check:rust"
+    "check:rust": "pnpm --filter @pix/desktop check:rust",
+    "test:memory": "pnpm --filter @pix/desktop test:memory",
+    "eval:memory": "pnpm --filter @pix/desktop eval:memory",
+    "eval:memory:fetch": "pnpm --filter @pix/desktop eval:memory:fetch",
+    "eval:memory:report": "pnpm --filter @pix/desktop eval:memory:report",
+    "eval:memory:judge": "pnpm --filter @pix/desktop eval:memory:judge",
+    "eval:memory:judge-live": "pnpm --filter @pix/desktop eval:memory:judge-live",
+    "eval:memory:retrieval": "pnpm --filter @pix/desktop eval:memory:retrieval",
+    "eval:memory:acceptance": "pnpm --filter @pix/desktop eval:memory:acceptance",
+    "eval:memory:preflight": "pnpm --filter @pix/desktop eval:memory:preflight"
   },
   "devDependencies": {
     "@types/node": "catalog:",
