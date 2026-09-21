@@ -3,6 +3,10 @@ export type Locale = "zh" | "en";
 const messages = {
   zh: {
     "app.name": "Pix",
+    "app.about": "关于 Pix",
+    "app.version": "版本 {version}",
+    "app.versionLoading": "正在读取版本…",
+    "app.versionUnavailable": "暂时无法读取版本",
     "timeline.thinking": "思考过程",
     "timeline.toolRunning": "运行中",
     "timeline.toolCompleted": "已完成",
@@ -1298,6 +1302,10 @@ const messages = {
   },
   en: {
     "app.name": "Pix",
+    "app.about": "About Pix",
+    "app.version": "Version {version}",
+    "app.versionLoading": "Loading version…",
+    "app.versionUnavailable": "Version unavailable",
     "timeline.thinking": "Thinking",
     "timeline.toolRunning": "Running",
     "timeline.toolCompleted": "Completed",

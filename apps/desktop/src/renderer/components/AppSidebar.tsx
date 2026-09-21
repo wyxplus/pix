@@ -57,6 +57,7 @@ import type { SettingsSection, ShellView } from "../store/shell-store.ts";
 import type { ThreadRunState } from "../lib/timeline.ts";
 import { SettingsSearchField } from "./settings/SettingsPrimitives.tsx";
 import { ProjectList } from "./ProjectList.tsx";
+import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover.tsx";
 
 export interface AppSidebarProps {
   colorMode: "light" | "dark";
@@ -136,6 +137,7 @@ export function AppSidebar(props: AppSidebarProps) {
   const asideRef = useRef<HTMLElement>(null);
   const leadingGutterPx = titlebarLeadingGutterPx(isMacDesktopChrome());
   const [showDeveloperChrome, setShowDeveloperChrome] = useState(false);
+  const [appVersion, setAppVersion] = useState<string | null>();
   const [contentPresent, setContentPresent] = useState(!props.collapsed);
   const lastOpenLayout = useRef({ width: props.widthPx, overlay: props.overlay === true });
 
@@ -178,11 +180,15 @@ export function AppSidebar(props: AppSidebarProps) {
       .getRuntime()
       .then((runtime) => {
         if (cancelled) return;
+        setAppVersion(runtime.appVersion || null);
         // Packaged installs hide the developer drawer; e2e / local still get it via flag or unpackaged runs.
         setShowDeveloperChrome(!runtime.isPackaged || runtime.enableTestCommands);
       })
       .catch(() => {
-        if (!cancelled) setShowDeveloperChrome(false);
+        if (!cancelled) {
+          setShowDeveloperChrome(false);
+          setAppVersion(null);
+        }
       });
     return () => {
       cancelled = true;
@@ -338,7 +344,12 @@ export function AppSidebar(props: AppSidebarProps) {
                   onSection={props.onSettingsSection}
                 />
               ) : (
-                <ProductRail {...props} tr={tr} showDeveloperChrome={showDeveloperChrome} />
+                <ProductRail
+                  {...props}
+                  tr={tr}
+                  showDeveloperChrome={showDeveloperChrome}
+                  appVersion={appVersion}
+                />
               )}
             </div>
 
@@ -450,6 +461,7 @@ function ProductRail(
   props: AppSidebarProps & {
     tr: (key: MessageKey, vars?: Record<string, string>) => string;
     showDeveloperChrome: boolean;
+    appVersion: string | null | undefined;
   },
 ) {
   const { tr } = props;
@@ -465,15 +477,34 @@ function ProductRail(
     <>
       {/* Compact product header shares its inset with navigation and section labels. */}
       <div className="sidebar-home-header" data-testid="sidebar-home-header">
-        <button
-          type="button"
-          data-testid="brand-menu"
-          title={tr("app.name")}
-          className="sidebar-brand-button"
-          onClick={props.onOpenPalette}
-        >
-          <span className="truncate">{tr("app.name")}</span>
-        </button>
+        <Popover>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              data-testid="brand-menu"
+              title={tr("app.about")}
+              aria-label={tr("app.about")}
+              className="sidebar-brand-button"
+            >
+              <span className="truncate">{tr("app.name")}</span>
+            </button>
+          </PopoverTrigger>
+          <PopoverContent
+            align="start"
+            className="w-auto min-w-44 max-w-[calc(100vw-2rem)] p-3"
+            aria-label={tr("app.about")}
+            data-testid="app-version-popover"
+          >
+            <div className="text-sm font-semibold">{tr("app.name")}</div>
+            <p className="mt-1 text-xs break-words text-muted-foreground" role="status">
+              {props.appVersion === undefined
+                ? tr("app.versionLoading")
+                : props.appVersion === null
+                  ? tr("app.versionUnavailable")
+                  : tr("app.version", { version: props.appVersion })}
+            </p>
+          </PopoverContent>
+        </Popover>
         <IconBtn testId="open-palette" title={tr("nav.search")} onClick={props.onOpenPalette}>
           <Search className="h-4 w-4" strokeWidth={1.6} />
         </IconBtn>
