@@ -42,10 +42,9 @@ test("settings, projects, packages and resources keep a draggable top area", asy
   page,
   pix,
 }) => {
-  await page.evaluate(() => {
-    localStorage.setItem("pix.sidebar.groupMode", "list");
-    window.dispatchEvent(new Event("pix-sidebar-group-mode"));
-  });
+  await page.evaluate(() => window.pix.data.preferences.patch({ "pix.sidebar.groupMode": "list" }));
+  await page.reload();
+  await page.waitForSelector('[data-testid="pix-app"][data-bootstrap-ready="true"]');
   for (const nav of ["nav-projects", "nav-packages", "nav-resources", "nav-settings"]) {
     await page.getByTestId(nav).click();
     const header = page.locator(".shell-content .drag-region").first();

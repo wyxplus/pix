@@ -1,5 +1,6 @@
+import { preferenceStorage } from "./preference-storage.ts";
 /**
- * Embedded pi TUI (ghostty-web) preferences — desktop-only localStorage.
+ * Embedded pi TUI (ghostty-web) preferences — desktop-only preferenceStorage.
  * Applied when the terminal surface mounts and when prefs change live.
  */
 
@@ -139,7 +140,7 @@ export function normalizeTerminalPrefs(
 
 export function loadTerminalPrefs(): TerminalPrefs {
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = preferenceStorage.getItem(KEY);
     if (!raw) return { ...DEFAULT_TERMINAL_PREFS };
     return normalizeTerminalPrefs(JSON.parse(raw) as Partial<TerminalPrefs>);
   } catch {
@@ -149,7 +150,7 @@ export function loadTerminalPrefs(): TerminalPrefs {
 
 export function saveTerminalPrefs(prefs: TerminalPrefs): void {
   try {
-    localStorage.setItem(KEY, JSON.stringify(normalizeTerminalPrefs(prefs)));
+    preferenceStorage.setItem(KEY, JSON.stringify(normalizeTerminalPrefs(prefs)));
   } catch {
     // ignore quota / private mode
   }

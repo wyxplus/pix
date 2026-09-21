@@ -1,3 +1,4 @@
+import { preferenceStorage } from "./preference-storage.ts";
 /** Desktop-only organize / sort prefs for the projects & conversations rail. */
 
 export type GroupMode = "project" | "list";
@@ -18,7 +19,7 @@ const PINNED_OPEN_KEY = "pix.sidebar.pinnedOpen";
 
 function loadString(key: string, fallback: string): string {
   try {
-    return localStorage.getItem(key) ?? fallback;
+    return preferenceStorage.getItem(key) ?? fallback;
   } catch {
     return fallback;
   }
@@ -26,7 +27,7 @@ function loadString(key: string, fallback: string): string {
 
 function saveString(key: string, value: string): void {
   try {
-    localStorage.setItem(key, value);
+    preferenceStorage.setItem(key, value);
   } catch {
     // ignore
   }
@@ -34,7 +35,7 @@ function saveString(key: string, value: string): void {
 
 function loadBool(key: string, fallback: boolean): boolean {
   try {
-    const raw = localStorage.getItem(key);
+    const raw = preferenceStorage.getItem(key);
     if (raw === "1") return true;
     if (raw === "0") return false;
   } catch {
@@ -45,7 +46,7 @@ function loadBool(key: string, fallback: boolean): boolean {
 
 function saveBool(key: string, value: boolean): void {
   try {
-    localStorage.setItem(key, value ? "1" : "0");
+    preferenceStorage.setItem(key, value ? "1" : "0");
   } catch {
     // ignore
   }

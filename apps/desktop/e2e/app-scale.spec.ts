@@ -62,10 +62,13 @@ test.describe("App scale", () => {
     await page.mouse.up();
     await expect.poll(async () => (await sidebar.boundingBox())!.width).toBe(340);
     const savedPrefs = () =>
-      page.evaluate(() => ({
-        width: localStorage.getItem("pix.sidebarWidth"),
-        collapsed: localStorage.getItem("pix.sidebarCollapsed"),
-      }));
+      page.evaluate(async () => {
+        const values = await window.pix.data.preferences.read();
+        return {
+          width: values?.["pix.sidebarWidth"] ?? null,
+          collapsed: values?.["pix.sidebarCollapsed"] ?? null,
+        };
+      });
     const initialPrefs = await savedPrefs();
     const initialWidth = (await sidebar.boundingBox())!.width;
 

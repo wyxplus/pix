@@ -1,5 +1,6 @@
+import { preferenceStorage } from "./preference-storage.ts";
 /**
- * Desktop appearance typography prefs (localStorage — not pi settings).
+ * Desktop appearance typography prefs (preferenceStorage — not pi settings).
  * Applied as CSS custom properties on <html>.
  */
 
@@ -82,7 +83,7 @@ export function normalizeAppearancePrefs(
 
 export function loadAppearancePrefs(): AppearancePrefs {
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = preferenceStorage.getItem(KEY);
     if (!raw) return { ...DEFAULT_APPEARANCE_PREFS };
     return normalizeAppearancePrefs(JSON.parse(raw) as Partial<AppearancePrefs>);
   } catch {
@@ -92,7 +93,7 @@ export function loadAppearancePrefs(): AppearancePrefs {
 
 export function saveAppearancePrefs(prefs: AppearancePrefs): void {
   try {
-    localStorage.setItem(KEY, JSON.stringify(normalizeAppearancePrefs(prefs)));
+    preferenceStorage.setItem(KEY, JSON.stringify(normalizeAppearancePrefs(prefs)));
   } catch {
     // ignore quota / private mode
   }

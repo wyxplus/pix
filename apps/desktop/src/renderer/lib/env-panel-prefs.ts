@@ -1,6 +1,7 @@
+import { preferenceStorage } from "./preference-storage.ts";
 /**
  * Environment panel: which sections are visible in the session env panel.
- * Stored in localStorage (desktop chrome only).
+ * Stored in preferenceStorage (desktop chrome only).
  */
 
 export type EnvPanelSectionId =
@@ -35,7 +36,7 @@ export const DEFAULT_ENV_PANEL_VISIBILITY: EnvPanelVisibility = {
 
 export function loadEnvPanelVisibility(): EnvPanelVisibility {
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = preferenceStorage.getItem(KEY);
     if (!raw) return { ...DEFAULT_ENV_PANEL_VISIBILITY };
     const parsed = JSON.parse(raw) as Partial<EnvPanelVisibility>;
     return {
@@ -49,7 +50,7 @@ export function loadEnvPanelVisibility(): EnvPanelVisibility {
 
 export function saveEnvPanelVisibility(next: EnvPanelVisibility): void {
   try {
-    localStorage.setItem(KEY, JSON.stringify(next));
+    preferenceStorage.setItem(KEY, JSON.stringify(next));
   } catch {
     // ignore
   }

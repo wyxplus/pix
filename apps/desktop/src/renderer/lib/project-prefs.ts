@@ -1,3 +1,4 @@
+import { preferenceStorage } from "./preference-storage.ts";
 import { normalizePathKey } from "@pix/contracts";
 /** Desktop-only project chrome prefs (pin / archive / rename / expand). */
 
@@ -20,7 +21,7 @@ const THREAD_DELETED_KEY = "pix.threads.deleted";
 
 function readJson<T>(key: string, fallback: T): T {
   try {
-    const raw = localStorage.getItem(key);
+    const raw = preferenceStorage.getItem(key);
     if (!raw) return fallback;
     return JSON.parse(raw) as T;
   } catch {
@@ -30,7 +31,7 @@ function readJson<T>(key: string, fallback: T): T {
 
 function writeJson(key: string, value: unknown): void {
   try {
-    localStorage.setItem(key, JSON.stringify(value));
+    preferenceStorage.setItem(key, JSON.stringify(value));
   } catch {
     // ignore
   }

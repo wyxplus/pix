@@ -1,3 +1,4 @@
+import { preferenceStorage } from "./preference-storage.ts";
 /**
  * Keyboard shortcut registry + local overrides.
  * Combos use a portable form: "mod+key", "mod+shift+key", "mod+alt+key".
@@ -58,7 +59,7 @@ export const SHORTCUT_UNBOUND = "";
 
 export function loadShortcutOverrides(): ShortcutOverrides {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = preferenceStorage.getItem(STORAGE_KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw) as ShortcutOverrides;
     return parsed && typeof parsed === "object" ? parsed : {};
@@ -69,7 +70,7 @@ export function loadShortcutOverrides(): ShortcutOverrides {
 
 export function saveShortcutOverrides(overrides: ShortcutOverrides): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(overrides));
+    preferenceStorage.setItem(STORAGE_KEY, JSON.stringify(overrides));
     notifyShortcutOverridesChanged();
   } catch {
     // ignore

@@ -1,8 +1,9 @@
+import { preferenceStorage } from "./preference-storage.ts";
 /** Desktop behavior prefs (confirm dialogs, etc.). */
 
 function loadBool(key: string, fallback: boolean): boolean {
   try {
-    const raw = localStorage.getItem(key);
+    const raw = preferenceStorage.getItem(key);
     if (raw === "1") return true;
     if (raw === "0") return false;
   } catch {
@@ -13,7 +14,7 @@ function loadBool(key: string, fallback: boolean): boolean {
 
 function saveBool(key: string, value: boolean): void {
   try {
-    localStorage.setItem(key, value ? "1" : "0");
+    preferenceStorage.setItem(key, value ? "1" : "0");
   } catch {
     // ignore
   }

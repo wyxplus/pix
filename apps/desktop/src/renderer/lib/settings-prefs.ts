@@ -1,3 +1,4 @@
+import { preferenceStorage } from "./preference-storage.ts";
 /** Desktop-only settings UI prefs (not agent/pi config). */
 
 export type AccessMode = "default" | "autoReview" | "full";
@@ -14,7 +15,7 @@ const ACCESS_MODE_LEGACY_KEY = "pix.composer.access";
 
 function loadBool(key: string, fallback: boolean): boolean {
   try {
-    const raw = localStorage.getItem(key);
+    const raw = preferenceStorage.getItem(key);
     if (raw === "1") return true;
     if (raw === "0") return false;
   } catch {
@@ -25,7 +26,7 @@ function loadBool(key: string, fallback: boolean): boolean {
 
 function saveBool(key: string, value: boolean): void {
   try {
-    localStorage.setItem(key, value ? "1" : "0");
+    preferenceStorage.setItem(key, value ? "1" : "0");
   } catch {
     // ignore
   }
@@ -35,7 +36,8 @@ function saveBool(key: string, value: boolean): void {
 export function loadAccessMode(): AccessMode {
   try {
     const raw =
-      localStorage.getItem(ACCESS_MODE_KEY) ?? localStorage.getItem(ACCESS_MODE_LEGACY_KEY);
+      preferenceStorage.getItem(ACCESS_MODE_KEY) ??
+      preferenceStorage.getItem(ACCESS_MODE_LEGACY_KEY);
     if (raw === "default" || raw === "autoReview" || raw === "full") return raw;
   } catch {
     // ignore
@@ -45,8 +47,8 @@ export function loadAccessMode(): AccessMode {
 
 export function saveAccessMode(mode: AccessMode): void {
   try {
-    localStorage.setItem(ACCESS_MODE_KEY, mode);
-    localStorage.setItem(ACCESS_MODE_LEGACY_KEY, mode);
+    preferenceStorage.setItem(ACCESS_MODE_KEY, mode);
+    preferenceStorage.setItem(ACCESS_MODE_LEGACY_KEY, mode);
   } catch {
     // ignore
   }

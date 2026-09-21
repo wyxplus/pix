@@ -20,6 +20,7 @@ struct Inner {
     failure: Mutex<Option<String>>,
     ready: AtomicBool,
     next: AtomicU64,
+    startup_timeout: Duration,
 }
 pub struct Sidecar {
     inner: Arc<Inner>,
@@ -83,6 +84,25 @@ impl Sidecar {
             &documents,
             !cfg!(debug_assertions),
         );
+        let locator = app.path().app_config_dir()?.join("storage-location.json");
+        let migration_pending = std::fs::read_to_string(&locator)
+            .ok()
+            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+            .is_some_and(|value| value.get("pending").is_some());
+        command.env("PIX_STORAGE_LOCATOR", locator);
+        let executable = std::env::current_exe()?;
+        let install = executable.parent().ok_or("No install directory")?;
+        #[cfg(target_os = "macos")]
+        let install = if install.ends_with("Contents/MacOS") {
+            install
+                .parent()
+                .and_then(|p| p.parent())
+                .and_then(|p| p.parent())
+                .unwrap_or(install)
+        } else {
+            install
+        };
+        command.env("PIX_PORTABLE_ROOT", install);
         let mut child = command.spawn()?;
         let inner = Arc::new(Inner {
             stdin: Mutex::new(child.stdin.take().ok_or("Missing stdin")?),
@@ -90,6 +110,7 @@ impl Sidecar {
             failure: Mutex::new(None),
             ready: AtomicBool::new(false),
             next: AtomicU64::new(1),
+            startup_timeout: Duration::from_secs(if migration_pending { 900 } else { 45 }),
         });
         let stderr = child.stderr.take().ok_or("Missing stderr")?;
         std::thread::spawn(move || {
@@ -181,7 +202,7 @@ impl Sidecar {
             if let Some(error) = self.inner.failure.lock().unwrap().clone() {
                 return Err(error);
             }
-            if start.elapsed() > Duration::from_secs(45) {
+            if start.elapsed() > self.inner.startup_timeout {
                 return Err("Node Agent Sidecar startup timed out".into());
             }
             tokio::time::sleep(Duration::from_millis(20)).await;

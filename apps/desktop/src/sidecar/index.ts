@@ -1,3 +1,4 @@
+import { DesktopPreferences } from "./storage/preferences.ts";
 import { normalizePathKey } from "@pix/contracts";
 import {
   IPC_PROTOCOL_VERSION,
@@ -44,6 +45,12 @@ import {
   atomicExport,
   type PixArchive,
 } from "./archives/archive.ts";
+import {
+  currentStorage,
+  storageState,
+  scheduleStorageMove,
+  cancelStorageMove,
+} from "./storage/profile.ts";
 import { app, dialog, shell } from "./native.ts";
 import {
   attachments,
@@ -4331,6 +4338,23 @@ function showOsNotification(payload: ShowOsNotificationPayload): Promise<boolean
 }
 
 void (async () => {
+  const desktopPreferences = new DesktopPreferences(
+    join(currentStorage().desktop, "preferences.json"),
+  );
+  rpc.handle("pix:preferences:read", () => desktopPreferences.read());
+  rpc.handle("pix:preferences:patch", (_event, patch, initialize) =>
+    desktopPreferences.patch(patch, initialize === true),
+  );
+  rpc.handle("pix:storage:state", () => storageState());
+  rpc.handle("pix:storage:cancel", () => cancelStorageMove());
+  rpc.handle("pix:storage:choose", async () => {
+    const result = await dialog.showOpenDialog(undefined, {
+      title: "Choose the parent folder for Pix data (copy on next launch)",
+      properties: ["openDirectory", "createDirectory"],
+    });
+    if (result.canceled || !result.filePaths[0]) return undefined;
+    return scheduleStorageMove(result.filePaths[0]);
+  });
   const archiveStore = new ArchiveStore(currentStorage().archives);
   const { NativeTransferStore } = await import("./transfers/native-transfer.ts");
   const nativeTransfers = new NativeTransferStore(join(currentStorage().archives, "transfers"));
@@ -5346,6 +5370,7 @@ void (async () => {
     piTuiController?.disposeAll();
     piTuiGuard.release();
     await supervisor?.stop();
+    await desktopPreferences.read();
     attachments.dispose();
   });
   if (process.env.PIX_NO_AUTO_RESUME !== "1" && supervisor) {

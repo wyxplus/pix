@@ -1,3 +1,4 @@
+import { preferenceStorage } from "./lib/preference-storage.ts";
 import { normalizePathKey } from "@pix/contracts";
 import "../desktop/api.ts";
 import { IPC_PROTOCOL_VERSION } from "@pix/contracts";
@@ -572,9 +573,9 @@ function App() {
   const [serviceTier, setServiceTier] = useState<ServiceTierId>(() => {
     try {
       // Prefer new key; fall back to legacy speed labels.
-      const next = localStorage.getItem("pix.composer.serviceTier");
+      const next = preferenceStorage.getItem("pix.composer.serviceTier");
       if (next === "flex" || next === "default" || next === "priority") return next;
-      return migrateLegacySpeedToServiceTier(localStorage.getItem("pix.composer.speed"));
+      return migrateLegacySpeedToServiceTier(preferenceStorage.getItem("pix.composer.speed"));
     } catch {
       // ignore
     }
@@ -2479,7 +2480,7 @@ function App() {
   async function changeServiceTier(tier: ServiceTierId) {
     setServiceTier(tier);
     try {
-      localStorage.setItem("pix.composer.serviceTier", tier);
+      preferenceStorage.setItem("pix.composer.serviceTier", tier);
     } catch {
       // ignore
     }

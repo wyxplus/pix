@@ -36,7 +36,7 @@ export function modelSupportsServiceTier(available: readonly string[]): boolean 
   return available.length > 0;
 }
 
-/** Migrate legacy localStorage speed values to service_tier. */
+/** Migrate legacy preferenceStorage speed values to service_tier. */
 export function migrateLegacySpeedToServiceTier(value: string | null | undefined): ServiceTierId {
   const v = (value ?? "").trim().toLowerCase();
   if (v === "fast" || v === "priority") return "priority";

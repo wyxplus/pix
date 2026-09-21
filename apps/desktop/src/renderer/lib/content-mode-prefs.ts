@@ -1,3 +1,4 @@
+import { preferenceStorage } from "./preference-storage.ts";
 import { normalizePathKey } from "@pix/contracts";
 /**
  * Desktop content surface preference: React chat vs embedded pi TUI.
@@ -6,7 +7,7 @@ import { normalizePathKey } from "@pix/contracts";
  * - Per-session map: each session remembers chat vs terminal independently so
  *   switching away and back restores the surface the user left it on.
  *
- * Preference only (localStorage). Actual PTY lifecycle is main-process IPC.
+ * Preference only (preferenceStorage). Actual PTY lifecycle is main-process IPC.
  */
 
 export type ContentMode = "chat" | "terminal";
@@ -30,7 +31,7 @@ export function contentModeSessionKey(sessionFile: string): string {
 
 export function loadContentMode(): ContentMode {
   try {
-    const raw = localStorage.getItem(GLOBAL_KEY);
+    const raw = preferenceStorage.getItem(GLOBAL_KEY);
     if (isContentMode(raw)) return raw;
   } catch {
     // ignore
@@ -40,7 +41,7 @@ export function loadContentMode(): ContentMode {
 
 export function saveContentMode(mode: ContentMode): void {
   try {
-    localStorage.setItem(GLOBAL_KEY, mode);
+    preferenceStorage.setItem(GLOBAL_KEY, mode);
   } catch {
     // ignore quota / private mode
   }
@@ -48,7 +49,7 @@ export function saveContentMode(mode: ContentMode): void {
 
 function readSessionMap(): Record<string, ContentMode> {
   try {
-    const raw = localStorage.getItem(BY_SESSION_KEY);
+    const raw = preferenceStorage.getItem(BY_SESSION_KEY);
     if (!raw) return {};
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
@@ -64,7 +65,7 @@ function readSessionMap(): Record<string, ContentMode> {
 
 function writeSessionMap(map: Record<string, ContentMode>): void {
   try {
-    localStorage.setItem(BY_SESSION_KEY, JSON.stringify(map));
+    preferenceStorage.setItem(BY_SESSION_KEY, JSON.stringify(map));
   } catch {
     // ignore
   }

@@ -12,6 +12,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { requireNode24 } from "./shared-node.mjs";
+import { validationSource } from "./validation-source.mjs";
 import { execFileSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -87,6 +88,13 @@ if (release) {
   const stagedPackage = JSON.parse(readFileSync(join(staged, "package.json"), "utf8"));
   stagedPackage.version = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
   writeFileSync(join(staged, "package.json"), `${JSON.stringify(stagedPackage, null, 2)}\n`);
+  writeFileSync(
+    join(staged, "validation-source.json"),
+    JSON.stringify({
+      sourceSha256: await validationSource(resolve(root, "../..")),
+      target,
+    }) + "\n",
+  );
   // Managed Python/npm tool runtimes retain the original first-launch provisioner.
   execFileSync(process.execPath, [join(root, "scripts/fetch-runtimes.mjs")], {
     cwd: root,

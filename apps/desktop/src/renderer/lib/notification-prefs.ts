@@ -1,5 +1,6 @@
+import { preferenceStorage } from "./preference-storage.ts";
 /**
- * Desktop notification preferences (localStorage — not pi settings).
+ * Desktop notification preferences (preferenceStorage — not pi settings).
  */
 
 export type NotificationPrefs = {
@@ -17,7 +18,7 @@ export type NotificationPrefs = {
   sound: boolean;
 };
 
-/** Bumped when defaults change so stale localStorage does not keep broken prefs. */
+/** Bumped when defaults change so stale preferenceStorage does not keep broken prefs. */
 const KEY = "pix.notifications.prefs.v2";
 
 export const DEFAULT_NOTIFICATION_PREFS: NotificationPrefs = {
@@ -33,7 +34,7 @@ export const DEFAULT_NOTIFICATION_PREFS: NotificationPrefs = {
 
 export function loadNotificationPrefs(): NotificationPrefs {
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = preferenceStorage.getItem(KEY);
     if (!raw) return { ...DEFAULT_NOTIFICATION_PREFS };
     const parsed = JSON.parse(raw) as Partial<NotificationPrefs>;
     return {
@@ -53,7 +54,7 @@ export function loadNotificationPrefs(): NotificationPrefs {
 
 export function saveNotificationPrefs(prefs: NotificationPrefs): void {
   try {
-    localStorage.setItem(KEY, JSON.stringify(prefs));
+    preferenceStorage.setItem(KEY, JSON.stringify(prefs));
   } catch {
     // ignore
   }

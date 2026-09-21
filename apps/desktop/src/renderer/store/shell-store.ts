@@ -1,9 +1,10 @@
+import { preferenceStorage } from "../lib/preference-storage.ts";
 import { normalizePathKey } from "@pix/contracts";
 /**
  * Short-lived UI projection store.
  * Host snapshots/events and pi JSONL remain the authority — this store must not
  * persist agent config, session trees, or secrets. Desktop prefs (locale, sidebar
- * chrome) may use localStorage only.
+ * chrome) may use preferenceStorage only.
  */
 import type {
   HostEvent,
@@ -351,7 +352,7 @@ export function classifyRuntimeEventDelivery(
 
 function loadPref<T>(key: string, parse: (raw: string) => T | undefined, fallback: T): T {
   try {
-    const raw = localStorage.getItem(key);
+    const raw = preferenceStorage.getItem(key);
     if (raw == null) return fallback;
     const value = parse(raw);
     return value === undefined ? fallback : value;
@@ -362,7 +363,7 @@ function loadPref<T>(key: string, parse: (raw: string) => T | undefined, fallbac
 
 function savePref(key: string, value: string): void {
   try {
-    localStorage.setItem(key, value);
+    preferenceStorage.setItem(key, value);
   } catch {
     // ignore quota / private mode
   }

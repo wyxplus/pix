@@ -1,3 +1,4 @@
+import { preferenceStorage } from "../lib/preference-storage.ts";
 /**
  * Sidebar hierarchy:
  * - 置顶 / 项目 → only places that show **projects** (expand → 会话 under that project)
@@ -403,7 +404,7 @@ export function ProjectList(props: ProjectListProps) {
     setPinned((prev) => {
       const next = prev.filter((p) => p.replace(/\\/g, "/").replace(/\/+$/, "") !== key);
       try {
-        localStorage.setItem("pix.projects.pinned", JSON.stringify(next));
+        preferenceStorage.setItem("pix.projects.pinned", JSON.stringify(next));
       } catch {
         // ignore
       }
@@ -413,7 +414,7 @@ export function ProjectList(props: ProjectListProps) {
     setArchived((prev) => {
       const next = prev.filter((p) => p.replace(/\\/g, "/").replace(/\/+$/, "") !== key);
       try {
-        localStorage.setItem("pix.projects.archived", JSON.stringify(next));
+        preferenceStorage.setItem("pix.projects.archived", JSON.stringify(next));
       } catch {
         // ignore
       }

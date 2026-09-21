@@ -1,3 +1,4 @@
+import { preferenceStorage } from "./preference-storage.ts";
 import type {
   ThemeLibrarySnapshot,
   ThemeSkinColors,
@@ -580,7 +581,7 @@ export function normalizeThemeSelection(raw: unknown): ThemeSelection {
 
 export function loadThemeSelection(): ThemeSelection {
   try {
-    const raw = localStorage.getItem(THEME_SELECTION_STORAGE_KEY);
+    const raw = preferenceStorage.getItem(THEME_SELECTION_STORAGE_KEY);
     return raw
       ? normalizeThemeSelection(JSON.parse(raw) as unknown)
       : { ...DEFAULT_THEME_SELECTION };
@@ -592,7 +593,7 @@ export function loadThemeSelection(): ThemeSelection {
 export function saveThemeSelection(selection: ThemeSelection): ThemeSelection {
   const next = normalizeThemeSelection(selection);
   try {
-    localStorage.setItem(THEME_SELECTION_STORAGE_KEY, JSON.stringify(next));
+    preferenceStorage.setItem(THEME_SELECTION_STORAGE_KEY, JSON.stringify(next));
   } catch {
     // LocalStorage is unavailable in a few embedded test surfaces.
   }

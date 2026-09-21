@@ -10,6 +10,16 @@ import type {
 
 const api: PixDesktopApi = {
   data: {
+    preferences: {
+      read: () => ipcRenderer.invoke("pix:preferences:read"),
+      patch: (values, initialize) =>
+        ipcRenderer.invoke("pix:preferences:patch", values, initialize),
+    },
+    storage: {
+      state: () => ipcRenderer.invoke("pix:storage:state"),
+      choose: () => ipcRenderer.invoke("pix:storage:choose"),
+      cancel: () => ipcRenderer.invoke("pix:storage:cancel"),
+    },
     archives: {
       exportPick: (input) => ipcRenderer.invoke("pix:archives:export", input),
       importPick: () => ipcRenderer.invoke("pix:archives:import"),
