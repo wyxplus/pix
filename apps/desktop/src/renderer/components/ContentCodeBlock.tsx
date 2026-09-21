@@ -142,14 +142,20 @@ export function ContentCodeBlock(props: {
   code: string;
   language?: string | undefined;
   locale?: Locale | undefined;
+  /** True while the code is still streaming; skips highlight and diagrams. */
+  streaming?: boolean | undefined;
 }) {
   const language = normalizedLanguage(props.language);
   const locale = props.locale ?? "en";
+  const streaming = props.streaming === true;
   const [copied, setCopied] = useState(false);
   const highlighted = useMemo(() => {
+    // Re-highlighting a still-growing block on every token is quadratic; wait
+    // for the stream to settle (one final highlight once `streaming` clears).
+    if (streaming) return "";
     if (language === "diff" || language === "mermaid" || !hljs.getLanguage(language)) return "";
     return hljs.highlight(props.code, { language, ignoreIllegals: true }).value;
-  }, [language, props.code]);
+  }, [language, props.code, streaming]);
 
   async function copyCode() {
     try {
@@ -179,7 +185,14 @@ export function ContentCodeBlock(props: {
         </Button>
       </div>
       {language === "mermaid" ? (
-        <MermaidDiagram source={props.code} locale={locale} />
+        streaming ? (
+          // mermaid.render() is expensive; never re-render a diagram per token.
+          <pre className={cn("content-code-pre", "content-code-streaming")}>
+            <code>{props.code}</code>
+          </pre>
+        ) : (
+          <MermaidDiagram source={props.code} locale={locale} />
+        )
       ) : (
         <pre className={cn("content-code-pre", language === "diff" && "content-code-diff")}>
           {language === "diff" ? (

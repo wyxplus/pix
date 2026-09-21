@@ -14,6 +14,7 @@ import type {
 } from "@pix/contracts";
 import {
   StrictMode,
+  memo,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -21,6 +22,8 @@ import {
   useState,
   type FormEvent,
   type KeyboardEvent,
+  type ReactNode,
+  type Ref,
 } from "react";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
@@ -145,7 +148,8 @@ import {
   unionRecentWorkspaces,
   workspaceLabel,
 } from "./lib/workspace.ts";
-import { appendHostEvent } from "./lib/host-events.ts";
+import { appendHostEvent, isTextDelta } from "./lib/host-events.ts";
+import { createStreamEventBuffer } from "./lib/stream-event-buffer.ts";
 import { deriveRunState, historyToTimeline, type TimelineItem } from "./lib/timeline.ts";
 import {
   classifyRuntimeEventDelivery,
@@ -153,8 +157,12 @@ import {
   shouldReuseForegroundThread,
   sessionRunKey,
   useShellStore,
+  type ShellState,
 } from "./store/shell-store.ts";
 import "./styles.css";
+
+/** One `runtime.event` envelope from the agent host (see `applyStreamDelta`). */
+type RuntimeHostEvent = Extract<HostEvent, { type: "runtime.event" }>;
 
 const initialThemeState = useShellStore.getState();
 applyDocumentTheme(initialThemeState.colorMode);
@@ -266,6 +274,201 @@ function hostPillState(status: string, running: boolean): string {
   return "idle";
 }
 
+/**
+ * Project the visible timeline from store state.
+ *
+ * Shared by the timeline pane (subscribed render) and by on-demand callers
+ * (selection side chat, edit confirmation) that must not make the shell root
+ * subscribe to the streamed live log.
+ */
+function projectTimeline(
+  input: {
+    history: ShellState["history"];
+    liveStream: ShellState["liveStream"];
+    hideThinkingBlock?: boolean | undefined;
+  },
+  sessionKey: string,
+): TimelineItem[] {
+  const projected = [...historyToTimeline(input.history), ...input.liveStream.items].filter(
+    (item) => !(input.hideThinkingBlock && item.kind === "thinking"),
+  );
+  // Prefix ids with session so React does not reuse rows across switches.
+  if (!sessionKey) return projected;
+  return projected.map((item) => ({ ...item, id: `${sessionKey}:${item.id}` }));
+}
+
+/**
+ * Subscribe to a store slice, re-rendering at most once per `intervalMs`.
+ *
+ * `subscribe` fires outside React, so a throttled read is the cheapest way to
+ * keep an "eventually consistent" mirror (the runtime diagnostics) off the
+ * streaming hot path. `isEqual` may compare cheap identities instead of running
+ * an expensive projection on every store write.
+ */
+function useThrottledStoreSlice<T>(
+  select: (state: ShellState) => T,
+  options: { intervalMs?: number; isEqual?: (a: ShellState, b: ShellState) => boolean } = {},
+): T {
+  const { intervalMs = 400, isEqual } = options;
+  const [value, setValue] = useState<T>(() => select(useShellStore.getState()));
+
+  useEffect(() => {
+    let timer: number | null = null;
+    const unsubscribe = useShellStore.subscribe((state, previous) => {
+      const changed = isEqual
+        ? !isEqual(state, previous)
+        : !Object.is(select(state), select(previous));
+      if (!changed) return;
+      if (timer !== null) return;
+      timer = window.setTimeout(() => {
+        timer = null;
+        setValue(select(useShellStore.getState()));
+      }, intervalMs);
+    });
+    return () => {
+      unsubscribe();
+      if (timer !== null) window.clearTimeout(timer);
+    };
+    // `select` / `isEqual` only read store state; re-subscribing on every render
+    // would restart the throttle window on each streamed token.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [intervalMs]);
+
+  return value;
+}
+
+/**
+ * Timeline pane. Owns the `timeline` projection so streamed tokens only
+ * re-render this subtree — `history` / `liveStream` / `events` are subscribed
+ * here and never in the shell root.
+ */
+const SessionTimelinePane = memo(function SessionTimelinePane(props: {
+  /** True once the pane finished its open/switch reveal. */
+  timelineReady: boolean;
+  running: boolean;
+  waiting: boolean;
+  locale: Locale;
+  sessionKey: string;
+  workspacePath?: string | undefined;
+  viewportRef: Ref<HTMLDivElement>;
+  endRef: Ref<HTMLDivElement>;
+  onEditUser: (item: Extract<TimelineItem, { kind: "user" }>, text: string) => void | Promise<void>;
+  onSelectionAction: (action: SelectionAction, selection: MessageSelection) => void;
+  onForkAssistant: (item: Extract<TimelineItem, { kind: "assistant" }>) => void | Promise<void>;
+  emptyState: ReactNode;
+  footer: ReactNode;
+}) {
+  const history = useShellStore((s) => s.history);
+  const liveStream = useShellStore((s) => s.liveStream);
+  const events = useShellStore((s) => s.events);
+  const hideThinkingBlock = useShellStore((s) => s.snapshot?.hideThinkingBlock);
+
+  const items = useMemo(
+    () => projectTimeline({ history, liveStream, hideThinkingBlock }, props.sessionKey),
+    [history, liveStream, props.sessionKey, hideThinkingBlock],
+  );
+
+  /**
+   * Only the trailing live item can still be growing. Marking exactly that row
+   * lets MarkdownContent chunk closed blocks and skip syntax highlighting on the
+   * tail, which is what keeps long replies from freezing the UI.
+   */
+  const streamingItemId = useMemo(() => {
+    if (!props.running) return undefined;
+    const last = liveStream.items[liveStream.items.length - 1];
+    if (!last || (last.kind !== "thinking" && last.kind !== "assistant")) return undefined;
+    return props.sessionKey ? `${props.sessionKey}:${last.id}` : last.id;
+  }, [props.running, liveStream.items, props.sessionKey]);
+
+  return (
+    <SessionTimelineScroller
+      autoScroll={props.timelineReady && items.length > 0}
+      viewportRef={props.viewportRef}
+      viewportClassName={cn(!props.timelineReady && "invisible pointer-events-none")}
+      viewportBusy={!props.timelineReady}
+      viewportReady={props.timelineReady}
+      items={items}
+      events={events}
+      running={props.running}
+      waiting={props.waiting}
+      locale={props.locale}
+      sessionKey={props.sessionKey}
+      {...(streamingItemId ? { streamingItemId } : {})}
+      {...(props.workspacePath ? { workspacePath: props.workspacePath } : {})}
+      ready={props.timelineReady}
+      editingLocked={props.running}
+      endRef={props.endRef}
+      onEditUser={props.onEditUser}
+      onSelectionAction={props.onSelectionAction}
+      onForkAssistant={props.onForkAssistant}
+      emptyState={props.emptyState}
+      footer={props.footer}
+    />
+  );
+});
+
+/**
+ * Runtime diagnostics: the Review panel plus the hidden mirrors E2E relies on.
+ *
+ * The event ring and the assistant transcript change on every streamed frame,
+ * so both slices are throttled — serializing the whole ring per frame was itself
+ * a per-token cost.
+ */
+const RuntimeDiagnostics = memo(function RuntimeDiagnostics(props: {
+  open: boolean;
+  onClose: () => void;
+}) {
+  const snapshot = useShellStore((s) => s.snapshot);
+  const events = useThrottledStoreSlice((s) => s.events);
+  const streamOutput = useThrottledStoreSlice(
+    (s) =>
+      [...historyToTimeline(s.history), ...s.liveStream.items]
+        .filter((item) => item.kind === "assistant")
+        .map((item) => item.text)
+        .join("\n"),
+    // Cheap identity check first: projecting the transcript on every store write
+    // would defeat the throttle.
+    { isEqual: (a, b) => a.history === b.history && a.liveStream === b.liveStream },
+  );
+
+  const snapshotJson = snapshot ? JSON.stringify(snapshot, null, 2) : "No runtime snapshot yet.";
+  const eventsJson = events.length ? JSON.stringify(events, null, 2) : "No events yet.";
+  const output = streamOutput || "No model output yet.";
+
+  if (!props.open) {
+    // Hidden mirrors so existing E2E selectors remain available without opening Review.
+    return (
+      <div hidden>
+        <pre data-testid="runtime-snapshot">{snapshotJson}</pre>
+        <pre data-testid="event-log">{eventsJson}</pre>
+        <pre data-testid="stream-output">{output}</pre>
+      </div>
+    );
+  }
+
+  return (
+    <aside className="review-panel" data-testid="review-panel">
+      <header>
+        <h2>Review</h2>
+        <button type="button" className="btn-ghost" onClick={props.onClose}>
+          Close
+        </button>
+      </header>
+      <div className="review-body">
+        <p className="empty-note">Runtime snapshot and recent host events.</p>
+        <pre data-testid="runtime-snapshot">{snapshotJson}</pre>
+        <pre data-testid="event-log" style={{ marginTop: "0.75rem" }}>
+          {events.length ? JSON.stringify(events.slice(-12), null, 2) : "No events yet."}
+        </pre>
+        {/* Keep stream-output for E2E assertions on latest assistant text. */}
+        <pre data-testid="stream-output" style={{ marginTop: "0.75rem" }}>
+          {output}
+        </pre>
+      </div>
+    </aside>
+  );
+});
+
 function App() {
   useEffect(() => {
     if (loadNotificationPrefs().enabled) {
@@ -275,8 +478,6 @@ function App() {
 
   const status = useShellStore((s) => s.status);
   const snapshot = useShellStore((s) => s.snapshot);
-  const events = useShellStore((s) => s.events);
-  const liveStream = useShellStore((s) => s.liveStream);
   const history = useShellStore((s) => s.history);
   const threads = useShellStore((s) => s.threads);
   const prompt = useShellStore((s) => s.prompt);
@@ -500,8 +701,9 @@ function App() {
       reportAppError(error, t(locale, "selection.saveFailed"));
       return;
     }
-    const sourceIndex = timeline.findIndex((item) => item.id === selection.messageId);
-    const sourceMessages = timeline
+    const projected = projectTimeline(useShellStore.getState(), sessionKey);
+    const sourceIndex = projected.findIndex((item) => item.id === selection.messageId);
+    const sourceMessages = projected
       .slice(0, Math.max(0, sourceIndex))
       .filter((item) => item.kind === "user" || item.kind === "assistant")
       .slice(-6)
@@ -710,24 +912,48 @@ function App() {
     foregroundMarkerState === "waiting" || foregroundMarkerState === "recovering"
       ? foregroundMarkerState
       : deriveRunState({ hostStatus: status, running, lastFailure });
-  const timeline = useMemo(() => {
-    // history = session JSONL at open; liveStream = append-only log for this session
-    // (streamed text only grows). Do not re-project deltas from the events ring.
-    const items = [...historyToTimeline(history), ...liveStream.items].filter(
-      (item) => !(snapshot?.hideThinkingBlock && item.kind === "thinking"),
+  /**
+   * Whether the thread has any visible row.
+   *
+   * Deliberately a low-cardinality selector: streamed tokens replace
+   * `liveStream.items` on every frame, and subscribing to the array here would
+   * re-render the whole shell tree for each token. Only the timeline pane and
+   * the runtime diagnostics below subscribe to the racy slices.
+   */
+  const hasActivity = useShellStore((s) => {
+    const hideThinking = s.snapshot?.hideThinkingBlock === true;
+    if (!hideThinking) return s.history.length > 0 || s.liveStream.items.length > 0;
+    return (
+      s.history.some((row) => row.role !== "thinking") ||
+      s.liveStream.items.some((item) => item.kind !== "thinking")
     );
-    // Prefix ids with session so React does not reuse rows across switches.
-    if (!sessionKey) return items;
-    return items.map((item) => ({ ...item, id: `${sessionKey}:${item.id}` }));
-  }, [history, liveStream, sessionKey, snapshot?.hideThinkingBlock]);
-  const hasActivity = timeline.length > 0;
-  const promptHistory = useMemo(
-    () =>
-      timeline.flatMap((item) =>
-        item.kind === "user" && item.text.trim() ? [compactUserMessageText(item.text)] : [],
-      ),
-    [timeline],
-  );
+  });
+  /**
+   * Row-count signal for the scroll-reveal effect. Only changes when a row is
+   * added or removed, never while text streams into an existing row.
+   */
+  const timelineCount = useShellStore((s) => s.history.length + s.liveStream.items.length);
+  /**
+   * Fingerprint of the user messages already in the live stream. String equality
+   * keeps composer history stable while assistant text streams in.
+   */
+  const liveUserPrompts = useShellStore((s) => {
+    let fingerprint = "";
+    for (const item of s.liveStream.items) {
+      if (item.kind === "user") fingerprint += `${item.text}\u0000`;
+    }
+    return fingerprint;
+  });
+  const promptHistory = useMemo(() => {
+    const fromHistory = historyToTimeline(history).flatMap((item) =>
+      item.kind === "user" && item.text.trim() ? [compactUserMessageText(item.text)] : [],
+    );
+    const fromLive = liveUserPrompts
+      .split("\u0000")
+      .filter((text) => text.trim().length > 0)
+      .map(compactUserMessageText);
+    return [...fromHistory, ...fromLive];
+  }, [history, liveUserPrompts]);
   const waitingForInput = runState === "waiting" || foregroundMarkerState === "waiting";
   const activeThread = threads.find((thread) => threadMatchesSession(thread, snapshot));
   const threadTitle =
@@ -1065,173 +1291,147 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(
-    () =>
-      window.pix.host.onEvent((event) => {
-        const store = useShellStore.getState();
-        if (event.type === "host.ready" || event.type === "runtime.snapshot") {
-          store.acceptSnapshot(event.snapshot);
-          // New runtime → drop previous extension chrome (status/widgets/title).
-          if (
-            event.snapshot.runtimeId &&
-            extensionUiStateRef.current.runtimeId &&
-            event.snapshot.runtimeId !== extensionUiStateRef.current.runtimeId
-          ) {
-            const cleared = emptyExtensionUiPortableState(event.snapshot.runtimeId);
-            extensionUiStateRef.current = cleared;
-            setExtensionUiState(cleared);
-          }
-          // Host up → refresh pi-home status (packages / resources), project or not.
-          if (event.type === "host.ready") void refreshPiStatus({ ensure: false });
-        } else if (event.type === "host.restarted") {
-          store.acceptSnapshot(event.snapshot);
-          // Clear busy markers bound to the previous runtime (e.g. abort-timeout recycle).
-          store.settleSessionByRuntime(event.previousRuntimeId, "aborted");
-          store.setStatus("Agent Host restarted");
-          {
-            const cleared = emptyExtensionUiPortableState(event.snapshot.runtimeId);
-            extensionUiStateRef.current = cleared;
-            setExtensionUiState(cleared);
-          }
-          void refreshPiStatus({ ensure: false });
-        } else if (event.type === "host.crashed") {
-          // Background (parked) host death must not wipe the foreground session.
-          if (event.runtimeId && store.runtimeId && event.runtimeId !== store.runtimeId) {
-            store.settleSessionByRuntime(event.runtimeId, "crashed", event.message);
-            return;
-          }
-          store.resetAfterCrash(event.message);
-          {
-            const cleared = emptyExtensionUiPortableState();
-            extensionUiStateRef.current = cleared;
-            setExtensionUiState(cleared);
-          }
-          maybeNotify("crash", event.message);
-        } else if (event.type === "session.list") {
-          const cwd = store.snapshot?.cwd;
-          const matched = cwd ? threadsForWorkspaceBucket(event.threads, cwd) : event.threads;
-          store.setThreads(mergeSidebarThreads(store.threads, matched));
-          if (cwd && matched.length > 0) cacheThreadsForCwd(cwd, matched);
-        } else if (event.type === "session.opened") {
-          // switchThread / newBlankTask apply the open themselves. Intermediate
-          // session.opened (e.g. from workspace.openPath) must not wipe history into
-          // an empty hero flash mid-transition.
-          if (switchingSessionRef.current || pendingPureConversationRef.current) {
-            const cwd = event.snapshot.cwd;
-            if (cwd && event.threads.length > 0) cacheThreadsForCwd(cwd, event.threads);
-            return;
-          }
-          markSessionOpenForBottomScroll();
-          store.applySessionOpen(event);
-          requestContentReveal();
-          // Keep sidebar caches in sync without clearing other projects' lists.
-          const cwd = event.snapshot.cwd;
-          if (cwd && event.threads.length > 0) cacheThreadsForCwd(cwd, event.threads);
-        } else if (event.type === "packages.progress") {
-          if (event.message) store.setStatus(event.message);
-        } else if (event.type === "packages.changed") {
-          store.setPackages(event.packages);
-          // Install/remove/update may load new skills/prompts/extensions.
-          void window.pix.resources
-            .list()
-            .then((list) => store.setResources(list))
-            .catch(() => undefined);
-        } else if (event.type === "runtime.event") {
-          const delivery = classifyRuntimeEventDelivery(store, event);
-          // Background (parked) hosts stay first-class: fold into that session's
-          // live stream and keep sidebar markers current. Do not touch foreground.
-          if (delivery === "stale-runtime") {
-            const parkedKey = store.sessionKeyForRuntime(event.runtimeId);
-            if (parkedKey) {
-              store.applySessionLiveStreamEvent(parkedKey, event.event, store.sentPrompts, {
-                sequence: event.sequence,
-              });
-            }
-            if (event.event.type === "agent.settled") {
-              // Background / parked host — always mark unread if not the open thread.
-              maybeMarkUnreadForRuntime(event.runtimeId);
-              const failure = store.takePendingFailure(event.runtimeId);
-              if (failure) {
-                store.settleSessionByRuntime(event.runtimeId, "failed", failure);
-                maybeNotify("error", failure);
-              } else {
-                store.settleSessionByRuntime(event.runtimeId, "completed");
-                maybeNotify("complete");
-              }
-            } else if (event.event.type === "message.failed") {
-              store.setPendingFailure(event.runtimeId, event.event.message);
-              const aborted = event.event.reason === "aborted";
-              if (aborted) {
-                store.takePendingFailure(event.runtimeId);
-                maybeMarkUnreadForRuntime(event.runtimeId);
-                store.settleSessionByRuntime(event.runtimeId, "aborted", event.event.message);
-                maybeNotify("error", event.event.message);
-              }
-              // Non-abort errors stay busy so auto-retry can re-enter recovering.
-            } else if (event.event.type === "retry.started") {
-              const key = store.sessionKeyForRuntime(event.runtimeId);
-              if (key) {
-                store.setSessionMarker(key, "recovering", {
-                  runtimeId: event.runtimeId,
-                  reason: event.event.errorMessage,
-                });
-              }
-            } else if (event.event.type === "retry.ended") {
-              if (!event.event.success) {
-                const msg = event.event.finalError ?? "Retry failed";
-                store.setPendingFailure(event.runtimeId, msg);
-                maybeMarkUnreadForRuntime(event.runtimeId);
-                store.settleSessionByRuntime(event.runtimeId, "failed", msg);
-                store.takePendingFailure(event.runtimeId);
-                maybeNotify("error", msg);
-              } else {
-                store.takePendingFailure(event.runtimeId);
-                const key = store.sessionKeyForRuntime(event.runtimeId);
-                if (key) {
-                  store.setSessionMarker(key, "running", { runtimeId: event.runtimeId });
-                }
-              }
-            } else if (event.event.type === "tool.started") {
-              const key = parkedKey ?? store.sessionKeyForRuntime(event.runtimeId);
-              if (key) {
-                store.setSessionMarker(key, "running", {
-                  runtimeId: event.runtimeId,
-                  reason: event.event.toolName,
-                });
-              }
-            } else if (event.event.type === "compaction.started") {
-              const key = parkedKey ?? store.sessionKeyForRuntime(event.runtimeId);
-              if (key) {
-                store.setSessionMarker(key, "running", { runtimeId: event.runtimeId });
-              }
-            }
-            // Ignore background agent.started — re-binding can re-light finished rows.
-            return;
-          }
-          if (delivery === "duplicate") return;
+  useEffect(() => {
+    /**
+     * Streamed `message.delta` / `thinking.delta` arrive one IPC message per token.
+     * Applying each one immediately re-renders the whole shell tree, so coalesce
+     * them into a single animation frame (timer fallback for hidden windows).
+     * Every other runtime event drains the queue first, which keeps streamed text
+     * strictly ordered around tools, settles and failures.
+     */
+    const runtimeEvents = createStreamEventBuffer<RuntimeHostEvent>({
+      isCoalescible: (event) => isTextDelta(event.event),
+      apply: (event) => applyStreamDelta(event),
+    });
 
-          // Always fold into append-only liveStream first (sequence-deduped, text never
-          // shrinks). Do this even on "gap" so tokens we did receive are not discarded.
-          store.applyLiveStreamEvent(event.event, store.sentPrompts, {
+    /**
+     * Delta-only path, equivalent to the `runtime.event` branch below for text
+     * deltas: parked (background) hosts keep folding into their own live stream,
+     * duplicates are dropped, and gaps still recover the host high-water mark.
+     */
+    function applyStreamDelta(event: RuntimeHostEvent): void {
+      const store = useShellStore.getState();
+      const delivery = classifyRuntimeEventDelivery(store, event);
+      if (delivery === "stale-runtime") {
+        const parkedKey = store.sessionKeyForRuntime(event.runtimeId);
+        if (parkedKey) {
+          store.applySessionLiveStreamEvent(parkedKey, event.event, store.sentPrompts, {
             sequence: event.sequence,
           });
+        }
+        return;
+      }
+      if (delivery === "duplicate") return;
+      store.applyLiveStreamEvent(event.event, store.sentPrompts, { sequence: event.sequence });
+      if (delivery === "gap") {
+        void window.pix.host.snapshot().then(store.acceptSnapshot);
+        store.setEvents((current) => appendHostEvent(current, event));
+        if (event.sequence > store.lastSequence) store.setLastSequence(event.sequence);
+        return;
+      }
+      if (event.sequence > store.lastSequence) store.setLastSequence(event.sequence);
+      store.setEvents((current) => appendHostEvent(current, event));
+    }
 
-          if (delivery === "gap") {
-            // Recover host high-water mark; liveStream already has this event's tokens.
-            void window.pix.host.snapshot().then(store.acceptSnapshot);
-            store.setEvents((current) => appendHostEvent(current, event));
-            if (event.sequence > store.lastSequence) store.setLastSequence(event.sequence);
-            return;
-          }
-          if (event.sequence > store.lastSequence) store.setLastSequence(event.sequence);
-
-          if (event.event.type === "queue.updated") {
-            store.setQueuedMessages({
-              steering: event.event.steering,
-              followUp: event.event.followUp,
+    const unsubscribe = window.pix.host.onEvent((event) => {
+      const store = useShellStore.getState();
+      if (event.type === "host.ready" || event.type === "runtime.snapshot") {
+        store.acceptSnapshot(event.snapshot);
+        // New runtime → drop previous extension chrome (status/widgets/title).
+        if (
+          event.snapshot.runtimeId &&
+          extensionUiStateRef.current.runtimeId &&
+          event.snapshot.runtimeId !== extensionUiStateRef.current.runtimeId
+        ) {
+          const cleared = emptyExtensionUiPortableState(event.snapshot.runtimeId);
+          extensionUiStateRef.current = cleared;
+          setExtensionUiState(cleared);
+        }
+        // Host up → refresh pi-home status (packages / resources), project or not.
+        if (event.type === "host.ready") void refreshPiStatus({ ensure: false });
+      } else if (event.type === "host.restarted") {
+        store.acceptSnapshot(event.snapshot);
+        // Clear busy markers bound to the previous runtime (e.g. abort-timeout recycle).
+        store.settleSessionByRuntime(event.previousRuntimeId, "aborted");
+        store.setStatus("Agent Host restarted");
+        {
+          const cleared = emptyExtensionUiPortableState(event.snapshot.runtimeId);
+          extensionUiStateRef.current = cleared;
+          setExtensionUiState(cleared);
+        }
+        void refreshPiStatus({ ensure: false });
+      } else if (event.type === "host.crashed") {
+        // Background (parked) host death must not wipe the foreground session.
+        if (event.runtimeId && store.runtimeId && event.runtimeId !== store.runtimeId) {
+          store.settleSessionByRuntime(event.runtimeId, "crashed", event.message);
+          return;
+        }
+        store.resetAfterCrash(event.message);
+        {
+          const cleared = emptyExtensionUiPortableState();
+          extensionUiStateRef.current = cleared;
+          setExtensionUiState(cleared);
+        }
+        maybeNotify("crash", event.message);
+      } else if (event.type === "session.list") {
+        const cwd = store.snapshot?.cwd;
+        const matched = cwd ? threadsForWorkspaceBucket(event.threads, cwd) : event.threads;
+        store.setThreads(mergeSidebarThreads(store.threads, matched));
+        if (cwd && matched.length > 0) cacheThreadsForCwd(cwd, matched);
+      } else if (event.type === "session.opened") {
+        // switchThread / newBlankTask apply the open themselves. Intermediate
+        // session.opened (e.g. from workspace.openPath) must not wipe history into
+        // an empty hero flash mid-transition.
+        if (switchingSessionRef.current || pendingPureConversationRef.current) {
+          const cwd = event.snapshot.cwd;
+          if (cwd && event.threads.length > 0) cacheThreadsForCwd(cwd, event.threads);
+          return;
+        }
+        markSessionOpenForBottomScroll();
+        store.applySessionOpen(event);
+        requestContentReveal();
+        // Keep sidebar caches in sync without clearing other projects' lists.
+        const cwd = event.snapshot.cwd;
+        if (cwd && event.threads.length > 0) cacheThreadsForCwd(cwd, event.threads);
+      } else if (event.type === "packages.progress") {
+        if (event.message) store.setStatus(event.message);
+      } else if (event.type === "packages.changed") {
+        store.setPackages(event.packages);
+        // Install/remove/update may load new skills/prompts/extensions.
+        void window.pix.resources
+          .list()
+          .then((list) => store.setResources(list))
+          .catch(() => undefined);
+      } else if (event.type === "runtime.event") {
+        // Coalesced streamed text — see `applyStreamDelta` above.
+        if (isTextDelta(event.event)) {
+          runtimeEvents.push(event);
+          return;
+        }
+        // Any other runtime event is a barrier: land pending text first.
+        runtimeEvents.flush();
+        const delivery = classifyRuntimeEventDelivery(store, event);
+        // Background (parked) hosts stay first-class: fold into that session's
+        // live stream and keep sidebar markers current. Do not touch foreground.
+        if (delivery === "stale-runtime") {
+          const parkedKey = store.sessionKeyForRuntime(event.runtimeId);
+          if (parkedKey) {
+            store.applySessionLiveStreamEvent(parkedKey, event.event, store.sentPrompts, {
+              sequence: event.sequence,
             });
+          }
+          if (event.event.type === "agent.settled") {
+            // Background / parked host — always mark unread if not the open thread.
+            maybeMarkUnreadForRuntime(event.runtimeId);
+            const failure = store.takePendingFailure(event.runtimeId);
+            if (failure) {
+              store.settleSessionByRuntime(event.runtimeId, "failed", failure);
+              maybeNotify("error", failure);
+            } else {
+              store.settleSessionByRuntime(event.runtimeId, "completed");
+              maybeNotify("complete");
+            }
           } else if (event.event.type === "message.failed") {
-            store.setLastFailure(event.event.message);
             store.setPendingFailure(event.runtimeId, event.event.message);
             const aborted = event.event.reason === "aborted";
             if (aborted) {
@@ -1240,22 +1440,18 @@ function App() {
               store.settleSessionByRuntime(event.runtimeId, "aborted", event.event.message);
               maybeNotify("error", event.event.message);
             }
-            // Non-abort model errors keep the turn busy. Auto-retry emits retry.started
-            // (recovering); final failure is settled by retry.ended / agent.settled.
+            // Non-abort errors stay busy so auto-retry can re-enter recovering.
           } else if (event.event.type === "retry.started") {
-            const key =
-              store.sessionKeyForRuntime(event.runtimeId) || sessionKeyFromSnapshot(store.snapshot);
+            const key = store.sessionKeyForRuntime(event.runtimeId);
             if (key) {
               store.setSessionMarker(key, "recovering", {
                 runtimeId: event.runtimeId,
                 reason: event.event.errorMessage,
               });
             }
-            store.setStatus(`Retrying ${event.event.attempt}/${event.event.maxAttempts}…`);
           } else if (event.event.type === "retry.ended") {
             if (!event.event.success) {
               const msg = event.event.finalError ?? "Retry failed";
-              store.setLastFailure(msg);
               store.setPendingFailure(event.runtimeId, msg);
               maybeMarkUnreadForRuntime(event.runtimeId);
               store.settleSessionByRuntime(event.runtimeId, "failed", msg);
@@ -1263,107 +1459,185 @@ function App() {
               maybeNotify("error", msg);
             } else {
               store.takePendingFailure(event.runtimeId);
-              store.setLastFailure(undefined);
-              const key =
-                store.sessionKeyForRuntime(event.runtimeId) ||
-                sessionKeyFromSnapshot(store.snapshot);
+              const key = store.sessionKeyForRuntime(event.runtimeId);
               if (key) {
                 store.setSessionMarker(key, "running", { runtimeId: event.runtimeId });
               }
             }
-          } else if (event.event.type === "agent.settled") {
-            maybeMarkUnreadForRuntime(event.runtimeId);
-            const failure = store.takePendingFailure(event.runtimeId);
-            if (failure) {
-              // Model error without a successful recovery (or after retries exhausted).
-              store.setLastFailure(failure);
-              store.settleSessionByRuntime(event.runtimeId, "failed", failure);
-              maybeNotify("error", failure);
-            } else {
-              store.setLastFailure(undefined);
-              store.settleSessionByRuntime(event.runtimeId, "completed");
-              maybeNotify("complete");
-            }
-            // Disk is flushed after assistant message — sync rail title/recency.
-            void window.pix.session
-              .list()
-              .then((listed) => {
-                if (!listed?.threads) return;
-                const cwd = useShellStore.getState().snapshot?.cwd;
-                const matched = cwd
-                  ? threadsForWorkspaceBucket(listed.threads, cwd)
-                  : listed.threads;
-                useShellStore
-                  .getState()
-                  .setThreads(mergeSidebarThreads(useShellStore.getState().threads, matched));
-                if (cwd && matched.length > 0) cacheThreadsForCwd(cwd, matched);
-              })
-              .catch(() => undefined);
-          } else if (event.event.type === "user.message") {
-            // Live session now has the user text in memory — refresh rail title/order.
-            void window.pix.session
-              .list()
-              .then((listed) => {
-                if (!listed?.threads) return;
-                const cwd = useShellStore.getState().snapshot?.cwd;
-                const matched = cwd
-                  ? threadsForWorkspaceBucket(listed.threads, cwd)
-                  : listed.threads;
-                useShellStore
-                  .getState()
-                  .setThreads(mergeSidebarThreads(useShellStore.getState().threads, matched));
-                if (cwd && matched.length > 0) cacheThreadsForCwd(cwd, matched);
-              })
-              .catch(() => undefined);
-          } else if (event.event.type === "message.completed") {
-            // A successful assistant step clears sticky failure from a prior retry.
-            store.takePendingFailure(event.runtimeId);
-            store.setLastFailure(undefined);
-          }
-          // Do NOT set running from agent.started / compaction.started — those can fire
-          // around host/session lifecycle without a user prompt and stuck the sidebar spinner.
-          // Busy markers are only set by sendPrompt → setSessionRunning(true).
-        } else if (event.type === "extensionUi.request") {
-          // Drop only when a different runtime is active. Allow through when
-          // runtimeId is not yet set (session_start can race host.ready).
-          if (store.runtimeId && event.runtimeId !== store.runtimeId) return;
-
-          // Fire-and-forget portable methods (notify/status/widget/title/editor/working).
-          if (isExtensionUiFireForgetMethod(event.method)) {
-            const result = applyExtensionUiFireForget(extensionUiStateRef.current, {
-              runtimeId: event.runtimeId,
-              method: event.method,
-              args: event.args,
-            });
-            extensionUiStateRef.current = result.state;
-            setExtensionUiState(result.state);
-            if (result.editorText !== undefined) {
-              store.setPrompt(result.editorText);
-            }
-            applyExtensionNotify(result.notify);
-          } else if (isExtensionUiDialogMethod(event.method)) {
-            // Only show waiting if this session is already in a user-initiated turn.
-            const key = sessionKeyFromSnapshot(store.snapshot);
-            if (key && store.runningSessions[key]) {
-              store.setSessionMarker(key, "waiting", {
+          } else if (event.event.type === "tool.started") {
+            const key = parkedKey ?? store.sessionKeyForRuntime(event.runtimeId);
+            if (key) {
+              store.setSessionMarker(key, "running", {
                 runtimeId: event.runtimeId,
-                reason: event.method,
+                reason: event.event.toolName,
               });
             }
-            void respondToExtensionUi(event).finally(() => {
-              const st = useShellStore.getState();
-              const k = sessionKeyFromSnapshot(st.snapshot);
-              if (k && st.runningSessions[k]) {
-                st.setSessionMarker(k, "running", { runtimeId: event.runtimeId });
-              }
+          } else if (event.event.type === "compaction.started") {
+            const key = parkedKey ?? store.sessionKeyForRuntime(event.runtimeId);
+            if (key) {
+              store.setSessionMarker(key, "running", { runtimeId: event.runtimeId });
+            }
+          }
+          // Ignore background agent.started — re-binding can re-light finished rows.
+          return;
+        }
+        if (delivery === "duplicate") return;
+
+        // Always fold into append-only liveStream first (sequence-deduped, text never
+        // shrinks). Do this even on "gap" so tokens we did receive are not discarded.
+        store.applyLiveStreamEvent(event.event, store.sentPrompts, {
+          sequence: event.sequence,
+        });
+
+        if (delivery === "gap") {
+          // Recover host high-water mark; liveStream already has this event's tokens.
+          void window.pix.host.snapshot().then(store.acceptSnapshot);
+          store.setEvents((current) => appendHostEvent(current, event));
+          if (event.sequence > store.lastSequence) store.setLastSequence(event.sequence);
+          return;
+        }
+        if (event.sequence > store.lastSequence) store.setLastSequence(event.sequence);
+
+        if (event.event.type === "queue.updated") {
+          store.setQueuedMessages({
+            steering: event.event.steering,
+            followUp: event.event.followUp,
+          });
+        } else if (event.event.type === "message.failed") {
+          store.setLastFailure(event.event.message);
+          store.setPendingFailure(event.runtimeId, event.event.message);
+          const aborted = event.event.reason === "aborted";
+          if (aborted) {
+            store.takePendingFailure(event.runtimeId);
+            maybeMarkUnreadForRuntime(event.runtimeId);
+            store.settleSessionByRuntime(event.runtimeId, "aborted", event.event.message);
+            maybeNotify("error", event.event.message);
+          }
+          // Non-abort model errors keep the turn busy. Auto-retry emits retry.started
+          // (recovering); final failure is settled by retry.ended / agent.settled.
+        } else if (event.event.type === "retry.started") {
+          const key =
+            store.sessionKeyForRuntime(event.runtimeId) || sessionKeyFromSnapshot(store.snapshot);
+          if (key) {
+            store.setSessionMarker(key, "recovering", {
+              runtimeId: event.runtimeId,
+              reason: event.event.errorMessage,
             });
           }
+          store.setStatus(`Retrying ${event.event.attempt}/${event.event.maxAttempts}…`);
+        } else if (event.event.type === "retry.ended") {
+          if (!event.event.success) {
+            const msg = event.event.finalError ?? "Retry failed";
+            store.setLastFailure(msg);
+            store.setPendingFailure(event.runtimeId, msg);
+            maybeMarkUnreadForRuntime(event.runtimeId);
+            store.settleSessionByRuntime(event.runtimeId, "failed", msg);
+            store.takePendingFailure(event.runtimeId);
+            maybeNotify("error", msg);
+          } else {
+            store.takePendingFailure(event.runtimeId);
+            store.setLastFailure(undefined);
+            const key =
+              store.sessionKeyForRuntime(event.runtimeId) || sessionKeyFromSnapshot(store.snapshot);
+            if (key) {
+              store.setSessionMarker(key, "running", { runtimeId: event.runtimeId });
+            }
+          }
+        } else if (event.event.type === "agent.settled") {
+          maybeMarkUnreadForRuntime(event.runtimeId);
+          const failure = store.takePendingFailure(event.runtimeId);
+          if (failure) {
+            // Model error without a successful recovery (or after retries exhausted).
+            store.setLastFailure(failure);
+            store.settleSessionByRuntime(event.runtimeId, "failed", failure);
+            maybeNotify("error", failure);
+          } else {
+            store.setLastFailure(undefined);
+            store.settleSessionByRuntime(event.runtimeId, "completed");
+            maybeNotify("complete");
+          }
+          // Disk is flushed after assistant message — sync rail title/recency.
+          void window.pix.session
+            .list()
+            .then((listed) => {
+              if (!listed?.threads) return;
+              const cwd = useShellStore.getState().snapshot?.cwd;
+              const matched = cwd ? threadsForWorkspaceBucket(listed.threads, cwd) : listed.threads;
+              useShellStore
+                .getState()
+                .setThreads(mergeSidebarThreads(useShellStore.getState().threads, matched));
+              if (cwd && matched.length > 0) cacheThreadsForCwd(cwd, matched);
+            })
+            .catch(() => undefined);
+        } else if (event.event.type === "user.message") {
+          // Live session now has the user text in memory — refresh rail title/order.
+          void window.pix.session
+            .list()
+            .then((listed) => {
+              if (!listed?.threads) return;
+              const cwd = useShellStore.getState().snapshot?.cwd;
+              const matched = cwd ? threadsForWorkspaceBucket(listed.threads, cwd) : listed.threads;
+              useShellStore
+                .getState()
+                .setThreads(mergeSidebarThreads(useShellStore.getState().threads, matched));
+              if (cwd && matched.length > 0) cacheThreadsForCwd(cwd, matched);
+            })
+            .catch(() => undefined);
+        } else if (event.event.type === "message.completed") {
+          // A successful assistant step clears sticky failure from a prior retry.
+          store.takePendingFailure(event.runtimeId);
+          store.setLastFailure(undefined);
         }
-        // Events ring is diagnostics / activity only — not the text authority.
-        store.setEvents((current) => appendHostEvent(current, event));
-      }),
-    [],
-  );
+        // Do NOT set running from agent.started / compaction.started — those can fire
+        // around host/session lifecycle without a user prompt and stuck the sidebar spinner.
+        // Busy markers are only set by sendPrompt → setSessionRunning(true).
+      } else if (event.type === "extensionUi.request") {
+        // Drop only when a different runtime is active. Allow through when
+        // runtimeId is not yet set (session_start can race host.ready).
+        if (store.runtimeId && event.runtimeId !== store.runtimeId) return;
+
+        // Fire-and-forget portable methods (notify/status/widget/title/editor/working).
+        if (isExtensionUiFireForgetMethod(event.method)) {
+          const result = applyExtensionUiFireForget(extensionUiStateRef.current, {
+            runtimeId: event.runtimeId,
+            method: event.method,
+            args: event.args,
+          });
+          extensionUiStateRef.current = result.state;
+          setExtensionUiState(result.state);
+          if (result.editorText !== undefined) {
+            store.setPrompt(result.editorText);
+          }
+          applyExtensionNotify(result.notify);
+        } else if (isExtensionUiDialogMethod(event.method)) {
+          // Only show waiting if this session is already in a user-initiated turn.
+          const key = sessionKeyFromSnapshot(store.snapshot);
+          if (key && store.runningSessions[key]) {
+            store.setSessionMarker(key, "waiting", {
+              runtimeId: event.runtimeId,
+              reason: event.method,
+            });
+          }
+          void respondToExtensionUi(event).finally(() => {
+            const st = useShellStore.getState();
+            const k = sessionKeyFromSnapshot(st.snapshot);
+            if (k && st.runningSessions[k]) {
+              st.setSessionMarker(k, "running", { runtimeId: event.runtimeId });
+            }
+          });
+        }
+      }
+      // Events ring is diagnostics / activity only — not the text authority.
+      store.setEvents((current) => appendHostEvent(current, event));
+    });
+
+    return () => {
+      // Land anything queued before tearing down, then stop listening.
+      runtimeEvents.flush();
+      runtimeEvents.dispose();
+      unsubscribe();
+    };
+  }, []);
 
   /**
    * Pin the conversation scrollport to its true bottom (above the in-flow composer).
@@ -1423,7 +1697,7 @@ function App() {
     const el = timelineScrollRef.current;
     if (!el) return;
 
-    if (timeline.length === 0) {
+    if (!hasActivity) {
       // True empty session after apply (revealToken bumped, switch done).
       finishBlankHold();
       return;
@@ -1471,7 +1745,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [sessionKey, history.length, timeline.length, composerDockHeight, revealToken]);
+  }, [sessionKey, history.length, timelineCount, hasActivity, composerDockHeight, revealToken]);
 
   // Track composer height so the jump-to-bottom control sits above the sticky dock
   // (composer is in-flow — content area bottom is the dock top, not the window edge).
@@ -1779,8 +2053,11 @@ function App() {
   } | null>(null);
 
   function isLastUserMessage(item: Extract<TimelineItem, { kind: "user" }>): boolean {
-    for (let i = timeline.length - 1; i >= 0; i--) {
-      const row = timeline[i];
+    // Read the projection on demand: this runs on an explicit edit action, not
+    // per frame, so the shell root must not subscribe to the live stream for it.
+    const projected = projectTimeline(useShellStore.getState(), sessionKey);
+    for (let i = projected.length - 1; i >= 0; i--) {
+      const row = projected[i];
       if (row?.kind !== "user") continue;
       if (item.entryId && row.entryId) return row.entryId === item.entryId;
       return row.id === item.id;
@@ -3386,7 +3663,7 @@ function App() {
                 snapshot.resources.contextFiles
               : 0
         }
-        canFork={timeline.some((item) => item.kind === "user")}
+        canFork={history.some((row) => row.role === "user") || liveUserPrompts.length > 0}
         onOpenPalette={() => navigateFromSidebar(() => setPaletteOpen(true))}
         onToggleTheme={() => toggleColorMode()}
         onToggleCollapse={sidebar.toggle}
@@ -3523,21 +3800,14 @@ function App() {
                 </div>
               ) : (
                 <div className="thread-pane">
-                  <SessionTimelineScroller
-                    autoScroll={timelineReady && hasActivity}
-                    viewportRef={timelineScrollRef}
-                    viewportClassName={cn(!timelineReady && "invisible pointer-events-none")}
-                    viewportBusy={!timelineReady}
-                    viewportReady={timelineReady}
-                    items={timeline}
-                    events={events}
+                  <SessionTimelinePane
+                    timelineReady={timelineReady}
                     running={running}
                     waiting={waitingForInput}
                     locale={locale}
                     sessionKey={sessionKey}
                     {...(contentWorkspacePath ? { workspacePath: contentWorkspacePath } : {})}
-                    ready={timelineReady}
-                    editingLocked={running}
+                    viewportRef={timelineScrollRef}
                     endRef={timelineEndRef}
                     onEditUser={(item, text) => void editUserAndResend(item, text)}
                     onSelectionAction={handleSelectionAction}
@@ -3808,48 +4078,7 @@ function App() {
           />
         )}
 
-        {reviewOpen ? (
-          <aside className="review-panel" data-testid="review-panel">
-            <header>
-              <h2>Review</h2>
-              <button type="button" className="btn-ghost" onClick={() => setReviewOpen(false)}>
-                Close
-              </button>
-            </header>
-            <div className="review-body">
-              <p className="empty-note">Runtime snapshot and recent host events.</p>
-              <pre data-testid="runtime-snapshot">
-                {snapshot ? JSON.stringify(snapshot, null, 2) : "No runtime snapshot yet."}
-              </pre>
-              <pre data-testid="event-log" style={{ marginTop: "0.75rem" }}>
-                {events.length ? JSON.stringify(events.slice(-12), null, 2) : "No events yet."}
-              </pre>
-              {/* Keep stream-output for E2E assertions on latest assistant text. */}
-              <pre data-testid="stream-output" style={{ marginTop: "0.75rem" }}>
-                {timeline
-                  .filter((item) => item.kind === "assistant")
-                  .map((item) => item.text)
-                  .join("\n") || "No model output yet."}
-              </pre>
-            </div>
-          </aside>
-        ) : (
-          // Hidden mirrors so existing E2E selectors remain available without opening Review.
-          <div hidden>
-            <pre data-testid="runtime-snapshot">
-              {snapshot ? JSON.stringify(snapshot, null, 2) : "No runtime snapshot yet."}
-            </pre>
-            <pre data-testid="event-log">
-              {events.length ? JSON.stringify(events, null, 2) : "No events yet."}
-            </pre>
-            <pre data-testid="stream-output">
-              {timeline
-                .filter((item) => item.kind === "assistant")
-                .map((item) => item.text)
-                .join("\n") || "No model output yet."}
-            </pre>
-          </div>
-        )}
+        <RuntimeDiagnostics open={reviewOpen} onClose={() => setReviewOpen(false)} />
       </div>
       {/* /shell-main — content column right of overlay sidebar */}
 

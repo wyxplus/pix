@@ -211,3 +211,69 @@ describe("MarkdownContent", () => {
     expect(html).toContain("docs");
   });
 });
+
+/** Same component with `streaming`, so closed blocks are chunked and only the tail re-parses. */
+function renderStreaming(markdown: string): string {
+  return renderToStaticMarkup(
+    createElement(MarkdownContent, { children: markdown, locale: "en", streaming: true }),
+  );
+}
+
+/**
+ * Server rendering inserts newlines between adjacent elements in one pass; chunked
+ * rendering concatenates separate passes. Inter-element whitespace produces no DOM
+ * text nodes, so it is not part of the markup contract.
+ */
+function collapseInterTagSpace(html: string): string {
+  return html.replace(/>\s+</g, "><");
+}
+
+describe("MarkdownContent streaming", () => {
+  it("produces the same markup as a single parse across block shapes", () => {
+    const cases = [
+      "# Title\n\nParagraph one.\n\nParagraph two.",
+      "- one\n\n- two\n\n- three",
+      "1. one\n2. two\n\nafter",
+      "| a | b |\n| - | - |\n| 1 | 2 |\n\nafter",
+      "text\n\n```ts\nconst a = 1;\n```\n\ntail",
+      "intro\n\n`x^2` inline\n\n$$\ny = 1\n$$\n\noutro",
+      "[docs][ref]\n\n[ref]: https://example.com",
+      "quote\n\n> line\n\nlast",
+      "para\n\n    indented code",
+      "中文段落。\n\n- 列表项\n\n**加粗**结尾",
+    ];
+    for (const markdown of cases) {
+      expect(collapseInterTagSpace(renderStreaming(markdown))).toBe(
+        collapseInterTagSpace(render(markdown)),
+      );
+    }
+  });
+
+  it("keeps an unclosed code fence unhighlighted while it streams", () => {
+    const html = renderStreaming("explain\n\n```ts\nconst answer = 42");
+    expect(html).toContain("const answer = 42");
+    expect(html).not.toContain("hljs-keyword");
+  });
+
+  it("highlights a code fence once it closes into a stable block", () => {
+    const html = renderStreaming("explain\n\n```ts\nconst answer = 42;\n```\n\ntail");
+    expect(html).toContain("hljs");
+  });
+
+  it("does not mount a diagram for an unclosed mermaid fence", () => {
+    const html = renderStreaming("```mermaid\ngraph TD; A-->B");
+    expect(html).toContain("graph TD");
+    expect(html).not.toContain("content-mermaid-loading");
+  });
+
+  it("keeps closed blocks unchanged while the tail grows", () => {
+    const prefix = "Lead paragraph.\n\n```ts\nlet x = 0;\n```\n\n";
+    const settled = collapseInterTagSpace(renderStreaming(`${prefix}partial`));
+    const grown = collapseInterTagSpace(renderStreaming(`${prefix}partial answer`));
+    // Everything before the (re-parsed) tail must be byte-identical, which is
+    // what lets the memoized block subtrees skip work.
+    const tailStart = settled.lastIndexOf("partial");
+    expect(tailStart).toBeGreaterThan(0);
+    expect(grown.startsWith(settled.slice(0, tailStart))).toBe(true);
+  });
+});

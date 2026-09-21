@@ -21,6 +21,7 @@ import {
   remarkLocalFileLinks,
 } from "../lib/content-rendering.ts";
 import { markdownSanitizeSchema } from "../lib/markdown-sanitize.ts";
+import { splitSafeMarkdownBlocks } from "../lib/markdown-chunker.ts";
 import { t, type Locale } from "../lib/i18n.ts";
 import { cn } from "../lib/utils.ts";
 
@@ -589,134 +590,196 @@ function MarkdownTable(props: {
   );
 }
 
+type MarkdownBodyProps = {
+  text: string;
+  workspacePath?: string | undefined;
+  locale: Locale;
+  /** True while `text` is still growing; skips expensive syntax work. */
+  streaming?: boolean | undefined;
+};
+
+/**
+ * Markdown renderer without the `.pix-md` wrapper.
+ *
+ * Kept container-free so chunked streaming can mount several bodies inside a
+ * single `.pix-md` element. `styles.css` targets `.pix-md > :first-child` and
+ * `.pix-md > :last-child`, so one wrapper per chunk would clear the first/last
+ * margin of every chunk and collapse the spacing between blocks.
+ */
+const MarkdownBody = memo(function MarkdownBody(props: MarkdownBodyProps) {
+  const locale = props.locale;
+
+  return (
+    <ReactMarkdown
+      // remark-gfm enables GFM tables, strikethrough, task lists, and autolinks.
+      remarkPlugins={[remarkGfm, remarkMath, remarkLocalFileLinks]}
+      rehypePlugins={[[rehypeSanitize, markdownSanitizeSchema], rehypeKatex]}
+      urlTransform={safeMarkdownUrl}
+      components={{
+        a({ href, children, className, title, id, ...rest }) {
+          const restProps = rest as Record<string, unknown>;
+          return (
+            <MarkdownLink
+              href={href}
+              workspacePath={props.workspacePath}
+              className={className}
+              title={title}
+              locale={locale}
+              id={id}
+              data-footnote-ref={restProps["data-footnote-ref"] ?? restProps.dataFootnoteRef}
+              data-footnote-backref={
+                restProps["data-footnote-backref"] ?? restProps.dataFootnoteBackref
+              }
+              dataFootnoteRef={restProps.dataFootnoteRef}
+              dataFootnoteBackref={restProps.dataFootnoteBackref}
+              aria-describedby={
+                typeof restProps["aria-describedby"] === "string"
+                  ? restProps["aria-describedby"]
+                  : typeof restProps.ariaDescribedBy === "string"
+                    ? restProps.ariaDescribedBy
+                    : undefined
+              }
+              aria-label={
+                typeof restProps["aria-label"] === "string"
+                  ? restProps["aria-label"]
+                  : typeof restProps.ariaLabel === "string"
+                    ? restProps.ariaLabel
+                    : undefined
+              }
+            >
+              {children}
+            </MarkdownLink>
+          );
+        },
+        code({ className, children }) {
+          const match = /(?:^|\s)language-([^\s]+)/.exec(className ?? "");
+          const code = (Array.isArray(children) ? children : [children])
+            .map((child) =>
+              typeof child === "string" || typeof child === "number" ? `${child}` : "",
+            )
+            .join("")
+            .replace(/\n$/, "");
+          if (match || code.includes("\n")) {
+            return (
+              <ContentCodeBlock
+                code={code}
+                language={match?.[1]}
+                locale={locale}
+                streaming={props.streaming}
+              />
+            );
+          }
+          return <code className={className}>{children}</code>;
+        },
+        img({ src, alt, title }) {
+          return (
+            <ContentImage
+              src={src}
+              alt={alt}
+              title={title}
+              workspacePath={props.workspacePath}
+              locale={locale}
+            />
+          );
+        },
+        pre({ children }) {
+          return <>{children}</>;
+        },
+        table({ children, ...tableProps }) {
+          return (
+            <MarkdownTable locale={locale} tableProps={tableProps as Record<string, unknown>}>
+              {children}
+            </MarkdownTable>
+          );
+        },
+        thead({ children, ...elProps }) {
+          return <thead {...domProps(elProps as Record<string, unknown>)}>{children}</thead>;
+        },
+        tbody({ children, ...elProps }) {
+          return <tbody {...domProps(elProps as Record<string, unknown>)}>{children}</tbody>;
+        },
+        tr({ children, ...elProps }) {
+          return <tr {...domProps(elProps as Record<string, unknown>)}>{children}</tr>;
+        },
+        th({ children, ...elProps }) {
+          return <th {...domProps(elProps as Record<string, unknown>)}>{children}</th>;
+        },
+        td({ children, ...elProps }) {
+          return <td {...domProps(elProps as Record<string, unknown>)}>{children}</td>;
+        },
+        section({ className, children, id, ...rest }) {
+          const restProps = rest as Record<string, unknown>;
+          const isFootnotes =
+            (typeof className === "string" && className.includes("footnotes")) ||
+            propFlag(restProps["data-footnotes"]) ||
+            propFlag(restProps.dataFootnotes);
+          if (isFootnotes) {
+            return (
+              <FootnotesSection locale={locale} className={className} id={id}>
+                {children}
+              </FootnotesSection>
+            );
+          }
+          return (
+            <section className={className} id={id}>
+              {children}
+            </section>
+          );
+        },
+        sup({ className, children }) {
+          return <sup className={cn("content-cite-sup", className)}>{children}</sup>;
+        },
+      }}
+    >
+      {props.text}
+    </ReactMarkdown>
+  );
+});
+
+/**
+ * Streaming body: closed blocks are memoized by `MarkdownBody`, so only the
+ * trailing block re-runs remark/rehype on each token.
+ */
+const MarkdownChunkedBody = memo(function MarkdownChunkedBody(props: MarkdownBodyProps) {
+  const blocks = useMemo(() => splitSafeMarkdownBlocks(props.text), [props.text]);
+
+  return (
+    <>
+      {blocks.map((block) => (
+        <MarkdownBody
+          key={block.offset}
+          text={block.content}
+          workspacePath={props.workspacePath}
+          locale={props.locale}
+          streaming={!block.isStable}
+        />
+      ))}
+    </>
+  );
+});
+
 export const MarkdownContent = memo(function MarkdownContent(props: {
   children: string;
   className?: string | undefined;
   workspacePath?: string | undefined;
   locale?: Locale | undefined;
+  /** True while the source text is still streaming in (enables block chunking). */
+  streaming?: boolean | undefined;
 }) {
   const text = normalizeLatexDelimiters(props.children ?? "");
   const locale = props.locale ?? "en";
   if (!text) return null;
 
+  const body = {
+    text,
+    workspacePath: props.workspacePath,
+    locale,
+    streaming: props.streaming,
+  } as const;
+
   return (
     <div className={cn("pix-md", props.className)} data-testid="markdown-content">
-      <ReactMarkdown
-        // remark-gfm enables GFM tables, strikethrough, task lists, and autolinks.
-        remarkPlugins={[remarkGfm, remarkMath, remarkLocalFileLinks]}
-        rehypePlugins={[[rehypeSanitize, markdownSanitizeSchema], rehypeKatex]}
-        urlTransform={safeMarkdownUrl}
-        components={{
-          a({ href, children, className, title, id, ...rest }) {
-            const restProps = rest as Record<string, unknown>;
-            return (
-              <MarkdownLink
-                href={href}
-                workspacePath={props.workspacePath}
-                className={className}
-                title={title}
-                locale={locale}
-                id={id}
-                data-footnote-ref={restProps["data-footnote-ref"] ?? restProps.dataFootnoteRef}
-                data-footnote-backref={
-                  restProps["data-footnote-backref"] ?? restProps.dataFootnoteBackref
-                }
-                dataFootnoteRef={restProps.dataFootnoteRef}
-                dataFootnoteBackref={restProps.dataFootnoteBackref}
-                aria-describedby={
-                  typeof restProps["aria-describedby"] === "string"
-                    ? restProps["aria-describedby"]
-                    : typeof restProps.ariaDescribedBy === "string"
-                      ? restProps.ariaDescribedBy
-                      : undefined
-                }
-                aria-label={
-                  typeof restProps["aria-label"] === "string"
-                    ? restProps["aria-label"]
-                    : typeof restProps.ariaLabel === "string"
-                      ? restProps.ariaLabel
-                      : undefined
-                }
-              >
-                {children}
-              </MarkdownLink>
-            );
-          },
-          code({ className, children }) {
-            const match = /(?:^|\s)language-([^\s]+)/.exec(className ?? "");
-            const code = (Array.isArray(children) ? children : [children])
-              .map((child) =>
-                typeof child === "string" || typeof child === "number" ? `${child}` : "",
-              )
-              .join("")
-              .replace(/\n$/, "");
-            if (match || code.includes("\n")) {
-              return <ContentCodeBlock code={code} language={match?.[1]} locale={locale} />;
-            }
-            return <code className={className}>{children}</code>;
-          },
-          img({ src, alt, title }) {
-            return (
-              <ContentImage
-                src={src}
-                alt={alt}
-                title={title}
-                workspacePath={props.workspacePath}
-                locale={locale}
-              />
-            );
-          },
-          pre({ children }) {
-            return <>{children}</>;
-          },
-          table({ children, ...tableProps }) {
-            return (
-              <MarkdownTable locale={locale} tableProps={tableProps as Record<string, unknown>}>
-                {children}
-              </MarkdownTable>
-            );
-          },
-          thead({ children, ...elProps }) {
-            return <thead {...domProps(elProps as Record<string, unknown>)}>{children}</thead>;
-          },
-          tbody({ children, ...elProps }) {
-            return <tbody {...domProps(elProps as Record<string, unknown>)}>{children}</tbody>;
-          },
-          tr({ children, ...elProps }) {
-            return <tr {...domProps(elProps as Record<string, unknown>)}>{children}</tr>;
-          },
-          th({ children, ...elProps }) {
-            return <th {...domProps(elProps as Record<string, unknown>)}>{children}</th>;
-          },
-          td({ children, ...elProps }) {
-            return <td {...domProps(elProps as Record<string, unknown>)}>{children}</td>;
-          },
-          section({ className, children, id, ...rest }) {
-            const restProps = rest as Record<string, unknown>;
-            const isFootnotes =
-              (typeof className === "string" && className.includes("footnotes")) ||
-              propFlag(restProps["data-footnotes"]) ||
-              propFlag(restProps.dataFootnotes);
-            if (isFootnotes) {
-              return (
-                <FootnotesSection locale={locale} className={className} id={id}>
-                  {children}
-                </FootnotesSection>
-              );
-            }
-            return (
-              <section className={className} id={id}>
-                {children}
-              </section>
-            );
-          },
-          sup({ className, children }) {
-            return <sup className={cn("content-cite-sup", className)}>{children}</sup>;
-          },
-        }}
-      >
-        {text}
-      </ReactMarkdown>
+      {props.streaming ? <MarkdownChunkedBody {...body} /> : <MarkdownBody {...body} />}
     </div>
   );
 });

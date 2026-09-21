@@ -544,6 +544,8 @@ export const TimelineRow = memo(function TimelineRow(props: {
   /** Fork at an assistant entry into a new session file (pi fork). */
   onForkAssistant?: (item: Extract<TimelineItem, { kind: "assistant" }>) => void | Promise<void>;
   editingLocked?: boolean;
+  /** True while this row's text is still streaming (enables block chunking). */
+  streaming?: boolean | undefined;
 }) {
   const { item } = props;
   const [editing, setEditing] = useState(false);
@@ -723,6 +725,7 @@ export const TimelineRow = memo(function TimelineRow(props: {
               className="w-full leading-relaxed text-foreground"
               workspacePath={props.workspacePath}
               locale={props.locale}
+              streaming={props.streaming}
             >
               {item.text}
             </MarkdownContent>
@@ -769,6 +772,7 @@ export const TimelineRow = memo(function TimelineRow(props: {
               className="content-thinking-body"
               workspacePath={props.workspacePath}
               locale={props.locale}
+              streaming={props.streaming}
             >
               {item.text}
             </MarkdownContent>
@@ -1521,6 +1525,8 @@ function ProcessThinking(props: {
   item: Extract<TimelineItem, { kind: "thinking" }>;
   locale: Locale;
   workspacePath?: string | undefined;
+  /** True while this thinking item is still streaming (enables block chunking). */
+  streaming?: boolean | undefined;
 }) {
   return (
     <div className="process-step-thinking" data-kind="thinking">
@@ -1528,6 +1534,7 @@ function ProcessThinking(props: {
         className="process-step-thinking-body"
         workspacePath={props.workspacePath}
         locale={props.locale}
+        streaming={props.streaming}
       >
         {props.item.text}
       </MarkdownContent>
@@ -1540,6 +1547,8 @@ function ProcessSteps(props: {
   items: Array<Extract<TimelineItem, { kind: "thinking" | "tool" }>>;
   locale: Locale;
   workspacePath?: string | undefined;
+  /** Id of the item currently streaming, when it belongs to this block. */
+  streamingItemId?: string | undefined;
 }) {
   const nodes: ReactNode[] = [];
   let i = 0;
@@ -1552,6 +1561,7 @@ function ProcessSteps(props: {
           item={item}
           locale={props.locale}
           workspacePath={props.workspacePath}
+          streaming={props.streamingItemId === item.id}
         />,
       );
       i += 1;
@@ -1612,6 +1622,8 @@ export const TimelineProcessBlock = memo(function TimelineProcessBlock(props: {
   /** Fallback when timestamps are missing (history). */
   durationLabel?: string | undefined;
   workspacePath?: string | undefined;
+  /** Id of the item currently streaming, when it belongs to this process block. */
+  streamingItemId?: string | undefined;
 }) {
   // Keep ticking while the turn is still open (including “responding” after tools).
   const active = Boolean(props.open && (props.running || props.waiting));
@@ -1680,6 +1692,7 @@ export const TimelineProcessBlock = memo(function TimelineProcessBlock(props: {
             items={props.items}
             locale={props.locale}
             workspacePath={props.workspacePath}
+            streamingItemId={props.streamingItemId}
           />
         </div>
       </details>

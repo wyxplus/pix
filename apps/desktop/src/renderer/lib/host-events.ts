@@ -9,7 +9,8 @@ function isRuntimeEvent(event: HostEvent): event is RuntimeHostEvent {
   return event.type === "runtime.event";
 }
 
-function isTextDelta(
+/** True for the streamed text deltas that may be coalesced into one frame. */
+export function isTextDelta(
   event: RuntimeEvent,
 ): event is Extract<RuntimeEvent, { type: "message.delta" | "thinking.delta" }> {
   return event.type === "message.delta" || event.type === "thinking.delta";

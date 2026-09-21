@@ -39,6 +39,8 @@ export type SessionTimelineContentProps = {
   workspacePath?: string;
   ready?: boolean;
   editingLocked?: boolean;
+  /** Timeline item id whose text is still streaming (block chunking + syntax off). */
+  streamingItemId?: string | undefined;
   onEditUser?: (item: UserTimelineItem, text: string) => void | Promise<void>;
   onForkAssistant?: (item: AssistantTimelineItem) => void | Promise<void>;
   onSelectionAction?: (action: SelectionAction, selection: MessageSelection) => void;
@@ -171,6 +173,7 @@ export function SessionTimelineContent(props: SessionTimelineContentProps) {
                     {...(block.endedAt ? { endedAt: block.endedAt } : {})}
                     {...(block.durationLabel ? { durationLabel: block.durationLabel } : {})}
                     {...(props.workspacePath ? { workspacePath: props.workspacePath } : {})}
+                    {...(props.streamingItemId ? { streamingItemId: props.streamingItemId } : {})}
                   />
                 ) : block.type === "media" ? (
                   <TimelineMediaRow
@@ -183,6 +186,7 @@ export function SessionTimelineContent(props: SessionTimelineContentProps) {
                     item={block.item}
                     locale={locale}
                     editingLocked={editingLocked}
+                    streaming={block.item.id === props.streamingItemId}
                     {...(props.workspacePath ? { workspacePath: props.workspacePath } : {})}
                     {...(props.onEditUser ? { onEditUser: props.onEditUser } : {})}
                     {...(props.onForkAssistant ? { onForkAssistant: props.onForkAssistant } : {})}
