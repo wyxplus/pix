@@ -1,3 +1,7 @@
+import type { DataApi } from "./data.ts";
+export * from "./data.ts";
+import type { MemoryApi } from "./memory.ts";
+export * from "./memory.ts";
 export const IPC_PROTOCOL_VERSION = 1 as const;
 
 export interface ResourceCounts {
@@ -1660,6 +1664,8 @@ export type SideChatArchive = {
 };
 
 export interface PixDesktopApi {
+  memory: MemoryApi;
+  data: DataApi;
   app: {
     /** OS platform + packaging flags for chrome layout / dev tools. */
     getRuntime(): Promise<{
