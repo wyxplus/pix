@@ -9,7 +9,7 @@
 | 40 个存储/导出场景                    | 37 通过、3 等待对应平台              | 覆盖归档、附件、遗忘、迁移和恢复                                                                                                                      |
 | 40 个原生迁出场景                     | 40 通过                              | Claude Code 2.1.87、Codex CLI 0.155.0-alpha.9.2；含实际终端恢复列表及历史预览；不代表桌面客户端或 IDE 兼容                                            |
 | macOS ARM64 DMG                       | 四项安装资源检查通过                 | 本地安装报告（`apps/desktop/scripts/eval/fixtures/installed-macos-arm64.json`，未入库）；临时签名，未公证；另已完成原生界面开关、重启持久化及遗忘检查 |
-| macOS Intel / Windows x64 / Linux x64 | 尚未运行                             | [四平台 CI 工作流](.github/workflows/memory-acceptance.yml)已准备，需要把待测源码交给对应系统的执行环境                                               |
+| macOS Intel / Windows x64 / Linux x64 | 尚未运行                             | [四平台 CI 工作流](.github/workflows/memory-acceptance.yml)已改为手动触发并可选 ref，可在 `main` 或已发布的 `v0.8.0` 标签上直接运行                   |
 | LongMemEval-S 500 题                  | 真实作答和替代裁判评分运行中         | [工作量报告](apps/desktop/scripts/eval/fixtures/longmemeval-preflight.json)，四组 2,000 份答案；尚未完成全量评分                                      |
 
 `apps/desktop/scripts/eval/fixtures/` 下的报告都是本机运行产物，记录了运行机器、源码/产物哈希、时间戳或真实模型输出，因此全部只保留在本地并由 `.gitignore` 排除，仓库只保留生成它们的脚本、工作流和命令。上表中的结果可以在没有这些文件时独立核对，重跑命令见下文。
@@ -53,8 +53,10 @@
 
 `report.mjs` 分别提供全量/部分覆盖、四组准确率及 95% Wilson 区间、题型、拒答、配对提升、检索证据召回、延迟、跳过来源和抽取失败数。`full500AlternativeScored` 与官方 `full500Scored` 分开；只有完成 500 × 4 的有效答案与评分才报告全量准确率。
 
-## 多平台执行的待定决策
+## 多平台执行
 
-本机只有 macOS ARM64。GitHub 仓库 `wyxplus/pix` 是公开仓库；运行所准备的四平台工作流需要上传当前待测源码到测试分支，涉及公开尚未提交的改动，因此尚未推送。工作流只构建和上传验收产物，不创建 Release；Windows 另外检查原生 WebView 中的记忆开关、持久化与遗忘。
+本机只有 macOS ARM64。GitHub 仓库 `wyxplus/pix` 是公开仓库，源码已在 `main` 上，并已发布 `v0.8.0`。四平台验收工作流改成纯手动触发：dispatch 时可以填写 `ref`（分支、标签或提交），留空则取发起本次运行的分支或标签，因此不再需要专门的测试分支，也不会在推送时自动消耗四台 runner。工作流只构建和上传验收产物，不创建 Release；Windows 另外检查原生 WebView 中的记忆开关、持久化与遗忘。
+
+本轮尚未运行该工作流，macOS Intel / Windows x64 / Linux x64 的安装包记忆验收仍为“尚未运行”。
 
 Apple 发布证书/公证凭据目前不可用。即便四个平台的临时构建全部通过，也不能据此宣称已通过发布签名或公证验收。

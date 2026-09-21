@@ -1,12 +1,16 @@
 name: Memory installer acceptance
 on:
   workflow_dispatch:
-  push:
-    branches: ["codex/memory-acceptance-*"]
+    inputs:
+      ref:
+        description: Branch, tag or commit to build and validate. Leave empty to use the ref this run started from.
+        required: false
+        type: string
+        default: ""
 permissions:
   contents: read
 concurrency:
-  group: memory-installer-${{ github.ref }}
+  group: memory-installer-${{ inputs.ref || github.ref }}
   cancel-in-progress: false
 jobs:
   installed:
@@ -30,6 +34,8 @@ jobs:
       APPLE_SIGNING_IDENTITY: "-"
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
       - uses: pnpm/action-setup@v6
         with:
           version: 11.15.1
