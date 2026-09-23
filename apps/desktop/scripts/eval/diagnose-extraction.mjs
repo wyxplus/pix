@@ -23,7 +23,7 @@ for (const item of dataset) {
   byType.get(item.question_type).push(item);
 }
 const selected = [];
-for (const [type, items] of byType) selected.push(...items.slice(0, CASES_PER_TYPE));
+for (const [, items] of byType) selected.push(...items.slice(0, CASES_PER_TYPE));
 console.error(`selected ${selected.length} cases across ${byType.size} types; model=${PROVIDER}`);
 
 const evaluator = await EvaluationModel.open({
