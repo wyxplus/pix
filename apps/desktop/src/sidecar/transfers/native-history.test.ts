@@ -11,6 +11,11 @@ const roots: string[] = [];
 afterEach(async () => {
   for (const path of roots.splice(0)) await rm(path, { recursive: true, force: true });
 });
+function codexScript(version: string) {
+  return process.platform === "win32"
+    ? `@echo off\r\necho codex-cli ${version}\r\n`
+    : `#!/bin/sh\nprintf "codex-cli ${version}\\n"\n`;
+}
 function fixture(): PixArchive {
   return {
     format: "pix.archive",
@@ -100,11 +105,11 @@ async function setup() {
   roots.push(root);
   const target = join(root, "target"),
     cwd = join(root, "workspace"),
-    binary = join(root, "codex-test");
+    binary = join(root, process.platform === "win32" ? "codex-test.cmd" : "codex-test");
   await mkdir(target);
   await mkdir(cwd);
-  await writeFile(binary, '#!/bin/sh\nprintf "codex-cli 0.155.0-alpha.9.2\\n"\n');
-  await chmod(binary, 0o700);
+  await writeFile(binary, codexScript("0.155.0-alpha.9.2"));
+  if (process.platform !== "win32") await chmod(binary, 0o700);
   const store = new NativeTransferStore(join(root, "transfers"));
   return { root, target, cwd, binary, store };
 }
@@ -141,7 +146,7 @@ it("rejects changed or unknown client versions at delivery and preserves the tar
     directory: target,
     cwd,
   });
-  await writeFile(binary, '#!/bin/sh\nprintf "codex-cli 999\\n"\n');
+  await writeFile(binary, codexScript("999"));
   await expect(store.deliver(plan.id)).rejects.toThrow("Unsupported");
   expect(await readdir(target)).toEqual([]);
   await expect(store.deliver("../escape")).rejects.toThrow("invalid_transfer_id");
@@ -190,7 +195,8 @@ it("delivers side conversation drafts and attachment references that survive rem
   const history = (
     await Promise.all(files.map((file) => readFile(join(target, "sessions", file), "utf8")))
   ).join("\n");
-  expect(history).toContain(restored);
+  // Rollout JSONL is JSON-encoded; on Windows backslashes are escaped, so compare against the JSON-encoded path.
+  expect(history).toContain(JSON.stringify(restored).slice(1, -1));
   expect(history).toContain("unfinished draft");
   expect(history).toContain("Unsent Pix draft");
   expect(history).not.toContain(attachment);

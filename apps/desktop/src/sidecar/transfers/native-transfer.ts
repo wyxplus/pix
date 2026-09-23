@@ -11,7 +11,7 @@ import {
   unlink,
 } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { execFile } from "node:child_process";
+import { exec, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { NativeTransferPreview } from "@pix/contracts";
 import { ARCHIVE_LIMIT, atomicExport, readBounded, type PixArchive } from "../archives/archive.ts";
@@ -23,7 +23,8 @@ import {
   transferBranches,
   type TransferBranch,
 } from "./native-history.ts";
-const exec = promisify(execFile);
+const execFileP = promisify(execFile);
+const execP = promisify(exec);
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
 interface Plan {
   preview: NativeTransferPreview;
@@ -39,7 +40,12 @@ export class NativeTransferStore {
     return join(this.directory, `${id}.json`);
   }
   private async version(binary: string, target: "claude" | "codex") {
-    const { stdout } = await exec(binary, ["--version"], { timeout: 5000, maxBuffer: 8192 });
+    const options = { timeout: 5000, maxBuffer: 8192 };
+    // npm shim launchers (.cmd/.bat) cannot be spawned directly on Windows; route them through cmd.exe.
+    const { stdout } =
+      process.platform === "win32" && /\.(cmd|bat)$/i.test(binary)
+        ? await execP(`"${binary}" --version`, options)
+        : await execFileP(binary, ["--version"], options);
     const version =
       target === "claude"
         ? stdout.startsWith("2.1.87 (Claude Code)")
