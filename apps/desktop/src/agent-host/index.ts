@@ -1,4 +1,8 @@
-import { MEMORY_EXTRACTION_PROMPT, MEMORY_CONSOLIDATION_PROMPT } from "@pix/agent-runtime";
+import {
+  MEMORY_EXTRACTION_PROMPT,
+  MEMORY_CONSOLIDATION_PROMPT,
+  parseModelJsonArray,
+} from "@pix/agent-runtime";
 import "./proxy-bootstrap.ts";
 import {
   createPixRuntime,
@@ -88,13 +92,13 @@ async function learnFromTurn(
         systemPrompt: MEMORY_EXTRACTION_PROMPT,
       },
     );
-    const candidates: unknown = JSON.parse(result);
+    const candidates: unknown = parseModelJsonArray(result);
     const plan = await memoryRequest<MemoryConsolidationPlan | null>("prepareConsolidation", {
       id: job.id,
       candidates,
     });
     if (!plan) return;
-    const decisions: unknown = JSON.parse(
+    const decisions: unknown = parseModelJsonArray(
       await runtimeHandle.completeText(JSON.stringify(plan), {
         isolated: true,
         maxTokens: 1500,

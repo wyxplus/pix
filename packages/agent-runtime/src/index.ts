@@ -1,4 +1,8 @@
-export { MEMORY_EXTRACTION_PROMPT, MEMORY_CONSOLIDATION_PROMPT } from "./memory-extraction.ts";
+export {
+  MEMORY_EXTRACTION_PROMPT,
+  MEMORY_CONSOLIDATION_PROMPT,
+  parseModelJsonArray,
+} from "./memory-extraction.ts";
 import { loadPromptImages, promptImageRoots } from "./prompt-images.ts";
 export { loadPromptImages, promptImageRoots } from "./prompt-images.ts";
 import { isPlainSettingObject, mergeSettingValue } from "./settings-merge.ts";
