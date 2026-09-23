@@ -9,6 +9,7 @@ import { MemoryStore } from "../../src/sidecar/memory/store.ts";
 import {
   MEMORY_EXTRACTION_PROMPT,
   MEMORY_CONSOLIDATION_PROMPT,
+  parseModelJsonArray,
 } from "../../../../packages/agent-runtime/src/memory-extraction.ts";
 
 const { values } = parseArgs({
@@ -224,7 +225,7 @@ try {
               { longTerm: true, shortTerm: true, dailyTokenBudget: 1_000_000 },
               0,
             );
-            for (const session of history) {
+            for (const [sessionIndex, session] of history.entries()) {
               const sources = session.messages.flatMap((message, index) => {
                 if (message.role !== "user") return [];
                 const text = `[Session date: ${session.date}]\n${message.content}`;
@@ -232,7 +233,10 @@ try {
                   skippedSources++;
                   return [];
                 }
-                return [{ sessionId: session.id, entryId: `entry-${index}`, text }];
+                // Globally unique per case, mirroring production entry ids: the
+                // validator matches by entryId alone, so per-session message
+                // indices would collide across sessions inside one batch.
+                return [{ sessionId: session.id, entryId: `m${sessionIndex}-${index}`, text }];
               });
               for (let offset = 0; offset < sources.length; offset += 20) {
                 const job = store.beginLearning(
@@ -250,9 +254,9 @@ try {
                     JSON.stringify({ scopes: job.scopes, sources: job.sources }),
                     1500,
                   );
-                  const plan = store.prepareConsolidation(job.id, JSON.parse(text));
+                  const plan = store.prepareConsolidation(job.id, parseModelJsonArray(text));
                   if (plan) {
-                    const decisions = JSON.parse(
+                    const decisions = parseModelJsonArray(
                       await complete(MEMORY_CONSOLIDATION_PROMPT, JSON.stringify(plan), 1500),
                     );
                     store.finishLearning(job.id, [], undefined, decisions);

@@ -26,7 +26,7 @@ await test(
               kind: "preference",
               content: "I prefer concise prose.",
               quote: "I prefer concise prose.",
-              entryId: "entry-0",
+              entryId: "m0-0",
             },
           ]);
         if (system.includes("Compare the evidence-validated"))
