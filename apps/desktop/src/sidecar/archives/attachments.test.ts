@@ -77,7 +77,10 @@ it("packs once, survives deletion of originals, remaps session and side chat, an
   await rm(project, { recursive: true });
   const restored = await store.prepareSession(imported.id, "source");
   expect(await readFile(restored.attachments[0]!, "utf8")).toBe("portable-content");
-  expect(await readFile(restored.path, "utf8")).toContain(restored.attachments[0]);
+  // JSONL is JSON-encoded; on Windows backslashes are escaped, so compare against the JSON-encoded path.
+  expect(await readFile(restored.path, "utf8")).toContain(
+    JSON.stringify(restored.attachments[0]!).slice(1, -1),
+  );
   expect(restored.sideChats.chats.side?.attachments).toEqual(restored.attachments);
   const side = new SideChatLibrary(join(root, "desktop"));
   const target = { sessionId: "new", sessionFile: join(root, "new.jsonl") };
@@ -103,10 +106,15 @@ it("reports missing and unauthorized paths without reading prose links or escapi
   const secret = join(root, "secret.txt");
   await writeFile(secret, "outside-secret");
   await symlink(secret, join(project, "linked"));
-  archive.sessions[0]!.jsonl = archive.sessions[0]!.jsonl.replace(
+  // Inject paths by editing parsed rows; string replacement would embed unescaped backslashes into JSON on Windows.
+  const rows = archive.sessions[0]!.jsonl.trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as { message?: { content?: string } });
+  rows[1]!.message!.content = rows[1]!.message!.content!.replace(
     "<path>notes.txt</path>",
     `<path>linked</path><path>missing</path><path>${secret}</path>`,
   );
+  archive.sessions[0]!.jsonl = rows.map((row) => JSON.stringify(row)).join("\n") + "\n";
   archive.sideChats = null;
   await packAttachments(archive, [project], new PathAccess());
   expect(archive.warnings).toHaveLength(3);

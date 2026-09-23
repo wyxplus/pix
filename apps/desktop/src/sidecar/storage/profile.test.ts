@@ -105,9 +105,16 @@ it("relocates managed attachment references in copied sessions without changing 
   const profile = await initializeStorage({ PIX_DATA_DIR: desktop, PIX_STORAGE_LOCATOR: locator });
   expect(profile.root).toBe(target);
   expect(await readFile(source, "utf8")).toBe(jsonl);
-  expect(await readFile(join(target, "agent", "sessions", "test.jsonl"), "utf8")).toContain(
-    join(target, "desktop", "attachments", "image.png"),
-  );
+  // JSONL is JSON-encoded, so compare against parsed rows instead of raw bytes (backslashes are escaped on Windows).
+  const copied = (await readFile(join(target, "agent", "sessions", "test.jsonl"), "utf8"))
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as { message?: { content?: string } });
+  expect(
+    copied.some((row) =>
+      row.message?.content?.includes(join(target, "desktop", "attachments", "image.png")),
+    ),
+  ).toBe(true);
   expect(await readFile(join(target, "desktop", "attachments", "image.png"), "utf8")).toBe(
     "fixture",
   );
