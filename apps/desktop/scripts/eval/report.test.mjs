@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 const exec = promisify(execFile);
 await test("official judge aggregation rejects mismatched hypotheses and distinguishes partial coverage", async () => {
   const root = await mkdtemp(join(tmpdir(), "pix-eval-report-"));
@@ -50,7 +51,7 @@ await test("official judge aggregation rejects mismatched hypotheses and disting
     }
     const run = (out) =>
       exec(process.execPath, [
-        new URL("./report.mjs", import.meta.url).pathname,
+        fileURLToPath(new URL("./report.mjs", import.meta.url)),
         "--dataset",
         join(root, "dataset.json"),
         "--run",
